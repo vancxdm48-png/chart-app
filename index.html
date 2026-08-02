@@ -72,7 +72,7 @@ th{color:var(--dim);font-weight:600;font-size:11px}
     <div class="sub">スクリーンショットまたはCSVを入れるだけ。設定不要で読み取り、この先の想定を描きます。</div>
   </div>
   <span style="background:#1f6feb;color:#fff;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700">
-    ver&nbsp;O</span>
+    ver&nbsp;Q</span>
   <button id="selftest" class="ghost">動作テスト</button>
   <button id="pick">ファイルを選ぶ</button>
 </header>
@@ -181,6 +181,23 @@ th{color:var(--dim);font-weight:600;font-size:11px}
     <div class="card">
       <h2 style="margin:0 0 4px;font-size:15px">この先どこまで動きうるか</h2>
       <div class="dim" style="font-size:12px">CSVを読み込んだ場合は実価格（円）。画像の場合は「1本あたりの平均的な値動き」を1とした相対表示です。</div>
+      <details style="margin-top:8px">
+        <summary style="font-size:12.5px">CSVを使うと何が変わるか／どこで手に入るか</summary>
+        <div class="dim" style="font-size:12px;margin-top:8px;line-height:1.8">
+          <b style="color:var(--fg)">変わること</b><br>
+          スクショは60〜90本しか読めません。この本数だと「上に終わる確率」の誤差が ±25% もあり、
+          50%でも70%でも区別がつきません。CSVで数千本入れると誤差が ±6% 程度まで縮み、
+          <b style="color:var(--fg)">本当に53〜55%の偏りがあるならそれを検出できます</b>。
+          70%にはなりませんが、「わからない」が「確かにある」に変わります。<br>
+          さらに本数が増えると<b style="color:var(--fg)">バックテスト</b>（予測区間が実際に何％当たったか）も動きます。<br><br>
+          <b style="color:var(--fg)">入手先</b><br>
+          ・証券会社の取引ツール（多くはチャート画面から「データ出力」「CSV保存」）<br>
+          ・TradingView → チャート右上のメニュー →「チャートデータをエクスポート」<br>
+          ・Yahoo!ファイナンス等の時系列ページをコピーして、この欄に貼り付け（⌘V）でも読めます<br><br>
+          <b style="color:var(--fg)">形式</b>：日付・始値・高値・安値・終値の列があれば、順番や見出し名は自動で判別します。
+          終値だけでも動きます。
+        </div>
+      </details>
       <table id="tbl"></table>
     </div>
 
@@ -863,7 +880,8 @@ function ewmaSd(d, lambda){
   return Math.sqrt(v/w);
 }
 
-function simulate(vals, o){
+/* ---- 1本あたりの動きの作り方をまとめる（予測と「先に触る確率」で共用） ---- */
+function prep(vals, o){
   const n=vals.length, last=vals[n-1];
   const d=[]; for(let i=1;i<n;i++) d.push(vals[i]-vals[i-1]);
   let mu=meanOf(d); let sg=sdOf(d);
@@ -878,7 +896,6 @@ function simulate(vals, o){
       sg=se;
     }
   }
-
   let a=0,b=0,resid=d;
   if(o.model==='ar1'&&d.length>3){
     const x=d.slice(0,-1), y=d.slice(1);
@@ -890,7 +907,36 @@ function simulate(vals, o){
     if(o.drift==='zero') a=0; else if(o.drift==='half') a*=0.5;
     resid=y.map((v,i)=>v-(a+b*x[i]));
   }
+  const step=(pr)=> o.model==='gbm' ? mu+sg*randn()
+              : o.model==='ar1'    ? a+b*pr+resid[(Math.random()*resid.length)|0]
+              :                      dz[(Math.random()*dz.length)|0];
+  return {last,d,mu,sg,dz,a,b,resid,step};
+}
 
+/* ---- 上値と下値、どちらに先に届くか ----
+   方向を当てにいくのではなく「距離の違い」から出る確率。
+   近いほうに先に当たりやすい、という事実だけを数えている。 */
+function firstTouch(vals, o, upV, downV, P){
+  const pr0=prep(vals,o), last=pr0.last, H=o.horizon;
+  P=P||20000;
+  let up=0, dn=0, none=0;
+  const hasUp=isFinite(upV), hasDn=isFinite(downV);
+  if(!hasUp && !hasDn) return null;
+  for(let p=0;p<P;p++){
+    let cv=last, pv=pr0.d.length?pr0.d[pr0.d.length-1]:0, done=0;
+    for(let h=0;h<H;h++){
+      const s=pr0.step(pv); pv=s; cv+=s;
+      if(hasUp && cv>=upV){ done=1; break; }
+      if(hasDn && cv<=downV){ done=-1; break; }
+    }
+    if(done>0) up++; else if(done<0) dn++; else none++;
+  }
+  return {up:up/P, down:dn/P, none:none/P, P};
+}
+
+function simulate(vals, o){
+  const pr0=prep(vals,o);
+  const {last,d,mu,sg,dz,a,b,resid}=pr0;
   const H=o.horizon, P=o.paths;
   const ends=Array.from({length:H},()=>new Float64Array(P));
   const samples=[]; const NS=Math.min(12,P);
@@ -898,10 +944,7 @@ function simulate(vals, o){
     let cv=last, pr=d.length?d[d.length-1]:0;
     const path=p<NS?[]:null;
     for(let h=0;h<H;h++){
-      let s;
-      if(o.model==='gbm') s=mu+sg*randn();
-      else if(o.model==='ar1'){ s=a+b*pr+resid[(Math.random()*resid.length)|0]; pr=s; }
-      else s=dz[(Math.random()*dz.length)|0];
+      const s=pr0.step(pr); pr=s;
       cv+=s; ends[h][p]=cv;
       if(path) path.push(cv);
     }
@@ -991,7 +1034,26 @@ function analyzeCsv(){
   const lg=all.map(s=>Math.log(s.c));
   const bt=backtest(lg, o);
   const btAlt=backtest(lg, {...o, vol: o.vol==='ewma'?'const':'ewma'});
-  A.res={ mode:'csv', series:use, all, sim, o, diag, bt, btAlt,
+
+  // 画像のときと同じ仕組みで上値・下値を出す。
+  // 画面のyは下ほど大きいので、対数価格の符号を反転して同じ向きに揃える。
+  const L=v=>-Math.log(v);
+  const cs=use.map(k=>{
+    const op=isFinite(k.o)?k.o:k.c, hi=isFinite(k.h)?k.h:Math.max(op,k.c),
+          lo=isFinite(k.l)?k.l:Math.min(op,k.c);
+    return { hiY:L(hi), loY:L(lo), bt:L(Math.max(op,k.c)), bb:L(Math.min(op,k.c)),
+             closeY:L(k.c), dir:k.c>=op?1:-1 };
+  });
+  const rr=cs.map(k=>k.loY-k.hiY).sort((x,y)=>x-y);
+  const atrPx=rr[rr.length>>1]||Math.abs(sim.sigma)||1e-4;
+  // 何年も前の高値は今の目安にならないので、直近だけを見る
+  const csL=cs.slice(-Math.max(60, Math.min(cs.length, o.horizon*10)));
+  const found=findLevels(csL, atrPx);
+  const lv=pickLevels(found, cs[cs.length-1].closeY, atrPx, csL);
+  const touch=firstTouch(vals, o,
+      lv.up.length? -lv.up[0].y : NaN, lv.down.length? -lv.down[0].y : NaN);
+
+  A.res={ mode:'csv', series:use, all, sim, o, diag, bt, btAlt, cs, lv, found, atrPx, touch,
           disp:v=>Math.exp(v), unit:'', ms:Math.round(performance.now()-t0) };
   drawCsv(); summarize(); reveal();
 }
@@ -1058,7 +1120,10 @@ function analyze(){
   const atrPx=rr[rr.length>>1]||4;
   const found=findLevels(cs, atrPx);
   const lv=pickLevels(found, cs[cs.length-1].closeY, atrPx, cs);
-  A.res={pal,reg,cs,sim,o,pitch,minPx,found,lv,atrPx,ms:Math.round(performance.now()-t0)};
+  const tUp = lv.up.length   ? -lv.up[0].y   : NaN;      // 画面のyを値の向きに直す
+  const tDn = lv.down.length ? -lv.down[0].y : NaN;
+  const touch = firstTouch(vals, o, tUp, tDn);
+  A.res={pal,reg,cs,sim,o,pitch,minPx,found,lv,atrPx,touch,ms:Math.round(performance.now()-t0)};
   draw(); summarize(); reveal();
 }
 function fail(msg){
@@ -1465,6 +1530,7 @@ function summarizeCsv(){
   const eb=sim.bands[sim.bands.length-1];
   writeOutcome(sim,o,yen,yen(sim.last),`${yen(eb.p5)} 〜 ${yen(eb.p95)}`,
     [['使ったデータ', series.length+' 本', '']]);
+  writeLevels(true, v=>Math.exp(v), sim.atr||1);
 
   const sgPct=sim.sigma*100;
   $('status').className='status';
@@ -1502,7 +1568,33 @@ function writeLevels(priced, v2p, unit){
       <td style="font-size:12px;color:${reach?'#d29922':'var(--dim)'}">${reach?'届きうる':'届きにくい'}</td>
     </tr>`;
   };
-  $('lvBody').innerHTML =
+  const tc=A.res.touch;
+  const bar = tc ? (()=>{
+    const u=tc.up*100, d=tc.down*100, n=tc.none*100;
+    const lead = u>d?'up':(d>u?'down':'even');
+    const gap=Math.abs(u-d);
+    return `<div style="margin-bottom:14px;padding:12px;border-radius:8px;background:var(--panel2);border:1px solid var(--line)">
+      <div style="font-weight:700;font-size:14px;margin-bottom:2px">
+        ${n>70 ? `どちらの水準も遠く、<span style="color:var(--warn)">${A.res.o.horizon}本先までに届く可能性は低い</span>です`
+        : gap<6 ? 'どちらに先に届くかは<span style="color:var(--warn)">ほぼ互角</span>です'
+                : `先に届きやすいのは <span style="color:${lead==='up'?'#4d9bff':'#e8506a'}">${lead==='up'?'上値①':'下値①'}</span> です`}
+      </div>
+      <div class="dim" style="font-size:12px;margin-bottom:9px">
+        ${A.res.o.horizon}本先までに、上値①と下値①のどちらに先に触れるか。
+        <b>向きを当てているのではなく、近いほうに当たりやすいという距離の話</b>なので、
+        上の「上に終わる確率」より信用できます。</div>
+      <div style="display:flex;height:26px;border-radius:5px;overflow:hidden;font-size:12px;font-weight:700;color:#fff">
+        <div style="width:${u}%;background:#4d9bff;display:flex;align-items:center;justify-content:center;min-width:0">${u>=12?u.toFixed(0)+'%':''}</div>
+        <div style="width:${d}%;background:#e8506a;display:flex;align-items:center;justify-content:center;min-width:0">${d>=12?d.toFixed(0)+'%':''}</div>
+        <div style="width:${n}%;background:#30363d;display:flex;align-items:center;justify-content:center;min-width:0">${n>=12?n.toFixed(0)+'%':''}</div>
+      </div>
+      <div class="dim" style="font-size:11.5px;margin-top:6px">
+        <span style="color:#4d9bff">■</span> 上値①に先に届く ${u.toFixed(0)}%　
+        <span style="color:#e8506a">■</span> 下値①に先に届く ${d.toFixed(0)}%　
+        <span style="color:#8b949e">■</span> どちらにも届かない ${n.toFixed(0)}%</div>
+    </div>`;
+  })() : '';
+  $('lvBody').innerHTML = bar +
     `<table style="width:100%;border-collapse:collapse">
        <tr class="dim" style="font-size:11.5px;text-align:left">
          <th></th><th>水準</th><th>距離</th><th>反発した回数</th><th>${A.res.o.horizon}本先までに</th></tr>
