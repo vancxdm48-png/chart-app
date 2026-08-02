@@ -71,7 +71,7 @@ th{color:var(--dim);font-weight:600;font-size:11px}
     <div class="sub">スクリーンショットまたはCSVを入れるだけ。設定不要で読み取り、この先の想定を描きます。</div>
   </div>
   <span style="background:#1f6feb;color:#fff;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700">
-    ver&nbsp;K</span>
+    ver&nbsp;M</span>
   <button id="selftest" class="ghost">動作テスト</button>
   <button id="pick">ファイルを選ぶ</button>
 </header>
@@ -90,6 +90,20 @@ th{color:var(--dim);font-weight:600;font-size:11px}
       <div class="kpis" id="kpis"></div>
       <div id="status" class="status" style="margin:0 0 10px"></div>
       <div id="verdict" class="status" style="margin:0 0 12px"></div>
+      <div id="calBox" style="margin:0 0 12px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel2)">
+        <div style="font-weight:700;font-size:13px;margin-bottom:4px" id="calTitle">
+          ここに2つ入れると、チャートの札が「幅」から「円」に変わります</div>
+        <div class="dim" style="font-size:12px;margin-bottom:8px">
+          スクショに写っている<b>いちばん高い値段</b>と<b>いちばん安い値段</b>を入れてください。
+          目盛りの数字でも、ローソク足の天井・底の値でも構いません。入れると上値・下値が円で出ます。</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div style="flex:1;min-width:140px"><label>いちばん高い値段</label>
+            <input id="pHigh2" type="number" step="any" placeholder="例 65510"></div>
+          <div style="flex:1;min-width:140px"><label>いちばん安い値段</label>
+            <input id="pLow2" type="number" step="any" placeholder="例 60520"></div>
+          <button id="applyCal" class="ghost" style="height:38px">円で表示</button>
+        </div>
+      </div>
       <canvas id="view"></canvas>
       <div class="legend">
         <span><span class="sw" style="background:#ffb020"></span><b style="color:#ffb020">予測ライン</b>（向きが不明なときは中央＝ほぼ水平）</span>
@@ -109,20 +123,6 @@ th{color:var(--dim);font-weight:600;font-size:11px}
           <button data-d="est">トレンドそのまま</button>
         </div>
         <span class="dim" style="font-size:11.5px">直近の傾きをどれだけ先に延ばすか</span>
-      </div>
-
-      <div id="calBox" style="margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel2)">
-        <div style="font-weight:700;font-size:13px;margin-bottom:4px">円で表示する（2つ入れるだけ）</div>
-        <div class="dim" style="font-size:12px;margin-bottom:8px">
-          スクショに写っている<b>いちばん高い値段</b>と<b>いちばん安い値段</b>を入れてください。
-          目盛りの数字でも、ローソク足の天井・底の値でも構いません。入れると上値・下値が円で出ます。</div>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
-          <div style="flex:1;min-width:140px"><label>いちばん高い値段</label>
-            <input id="pHigh2" type="number" step="any" placeholder="例 65510"></div>
-          <div style="flex:1;min-width:140px"><label>いちばん安い値段</label>
-            <input id="pLow2" type="number" step="any" placeholder="例 60520"></div>
-          <button id="applyCal" class="ghost" style="height:38px">円で表示</button>
-        </div>
       </div>
 
       <button id="again" class="ghost hidden" style="margin-top:10px">別の画像を読み込む</button>
@@ -626,6 +626,212 @@ function quality(cs, reg){
   return cs.length;
 }
 
+
+/* ================= 価格軸の自動読み取り =================
+   目盛りの数字を切り出して 0〜9 と照合し、y と価格の直線を求める。
+   読めた数字が「等間隔・直線・区切りのよい刻み」に乗らなければ採用しない。
+   1文字でも取り違えるとすべての値段が狂うので、採用条件は厳しくしてある。 */
+function mkCanvas(w,h){ const c=document.createElement('canvas'); c.width=w; c.height=h; return c; }
+
+/* ---- 数字テンプレートを、切り出した文字と同じ高さで描いて作る ---- */
+const tplCache={};
+function templates(h){
+  if(tplCache[h]) return tplCache[h];
+  const out={};
+  for(const ch of '0123456789'){
+    const cv=mkCanvas(Math.ceil(h*1.2), Math.ceil(h*1.6));
+    const g=cv.getContext('2d');
+    g.fillStyle='#000'; g.fillRect(0,0,cv.width,cv.height);
+    g.fillStyle='#fff'; g.font=`600 ${h*1.34|0}px sans-serif`; g.textBaseline='alphabetic';
+    g.fillText(ch, 2, h*1.34|0);
+    const d=g.getImageData(0,0,cv.width,cv.height).data;
+    const m=[];
+    for(let y=0;y<cv.height;y++){const r=[];for(let x=0;x<cv.width;x++)r.push(d[(y*cv.width+x)*4]>110?1:0);m.push(r);}
+    const cm=crop(m); out[ch]={n:norm(cm), holes:holes(cm)};
+  }
+  return tplCache[h]=out;
+}
+function crop(m){
+  let x0=1e9,x1=-1,y0=1e9,y1=-1;
+  m.forEach((r,y)=>r.forEach((v,x)=>{ if(v){ if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; }}));
+  if(x1<0) return [[0]];
+  return m.slice(y0,y1+1).map(r=>r.slice(x0,x1+1));
+}
+/* 穴の数（0と8を確実に分ける。字体が変わっても壊れにくい特徴） */
+function holes(m){
+  const H=m.length,W=m[0].length;
+  const seen=Array.from({length:H},()=>new Uint8Array(W));
+  const flood=(sy,sx)=>{ const st=[[sy,sx]]; seen[sy][sx]=1;
+    while(st.length){ const [y,x]=st.pop();
+      for(const [dy,dx] of [[1,0],[-1,0],[0,1],[0,-1]]){ const b=y+dy,a=x+dx;
+        if(b<0||a<0||b>=H||a>=W) continue;
+        if(!m[b][a] && !seen[b][a]){ seen[b][a]=1; st.push([b,a]); } } } };
+  for(let y=0;y<H;y++){ if(!m[y][0])flood(y,0); if(!m[y][W-1])flood(y,W-1); }
+  for(let x=0;x<W;x++){ if(!m[0][x])flood(0,x); if(!m[H-1][x])flood(H-1,x); }
+  let n=0;
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++)
+    if(!m[y][x]&&!seen[y][x]){ n++; flood(y,x); }
+  return n;
+}
+const NW=10, NH=16;
+function norm(m){                       // 10x16 の濃さに正規化
+  const H=m.length, W=m[0].length, o=[];
+  for(let y=0;y<NH;y++){ const r=[];
+    for(let x=0;x<NW;x++){
+      let s=0,n=0;
+      for(let yy=Math.floor(y*H/NH); yy<Math.max(Math.floor(y*H/NH)+1,Math.floor((y+1)*H/NH)); yy++)
+        for(let xx=Math.floor(x*W/NW); xx<Math.max(Math.floor(x*W/NW)+1,Math.floor((x+1)*W/NW)); xx++){
+          s+=m[Math.min(H-1,yy)][Math.min(W-1,xx)]; n++;
+        }
+      r.push(n?s/n:0);
+    } o.push(r); }
+  return o;
+}
+function score(a,b){                     // 正規化相関
+  let sa=0,sb=0,ab=0,ma=0,mb=0,n=NW*NH;
+  for(let y=0;y<NH;y++)for(let x=0;x<NW;x++){ ma+=a[y][x]; mb+=b[y][x]; }
+  ma/=n; mb/=n;
+  for(let y=0;y<NH;y++)for(let x=0;x<NW;x++){
+    const p=a[y][x]-ma,q=b[y][x]-mb; ab+=p*q; sa+=p*p; sb+=q*q; }
+  return (sa&&sb)? ab/Math.sqrt(sa*sb) : 0;
+}
+
+function readAxis(D,W,H,xa,ya,yb){
+  const lum=i=>0.299*D[i]+0.587*D[i+1]+0.114*D[i+2];
+  const vals=[];for(let y=ya;y<=yb;y+=2)for(let x=xa;x<W;x+=2)vals.push(lum((y*W+x)*4));
+  vals.sort((a,b)=>a-b);
+  const bg=vals[(vals.length*0.5)|0], hi=vals[(vals.length*0.97)|0], lo=vals[(vals.length*0.03)|0];
+  const dark=bg<128;
+  const thr = dark ? (bg+hi)/2 : (bg+lo)/2;
+  if(dark? hi-bg<40 : bg-lo<40) return null;
+  const ink=(x,y)=>{const L=lum((y*W+x)*4); return dark? L>=thr : L<=thr;};
+  const maxN=(W-xa)*0.6;
+  const rows=[]; let cur=null;
+  for(let y=ya;y<=yb;y++){
+    let n=0; for(let x=xa;x<W;x++) if(ink(x,y)) n++;
+    if(n>=2&&n<=maxN){ if(!cur)cur={a:y,b:y}; cur.b=y; }
+    else { if(cur&&cur.b-cur.a>=7) rows.push(cur); cur=null; }
+  }
+  if(cur&&cur.b-cur.a>=7) rows.push(cur);
+  const out=[];
+  for(const r of rows){
+    const h=r.b-r.a+1;
+    // 列ごとの空白で文字に切る
+    const colHas=[]; let xa2=W, xb2=xa;
+    for(let x=xa;x<W;x++){ let v=false; for(let y=r.a;y<=r.b;y++) if(ink(x,y)){v=true;break;}
+      colHas[x]=v; if(v){ if(x<xa2)xa2=x; if(x>xb2)xb2=x; } }
+    if(xb2<xa2) continue;
+    const gl=[]; let g0=-1;
+    for(let x=xa2;x<=xb2+1;x++){
+      if(colHas[x]){ if(g0<0) g0=x; }
+      else if(g0>=0){ gl.push([g0,x-1]); g0=-1; }
+    }
+    const T=templates(h);
+    let s='';
+    for(const [a,b] of gl){
+      const m=[];
+      for(let y=r.a;y<=r.b;y++){ const row=[]; for(let x=a;x<=b;x++) row.push(ink(x,y)?1:0); m.push(row); }
+      const cm=crop(m);
+      const gh=cm.length, gw=cm[0].length;
+      if(gh<h*0.45 && gw<h*0.45){ s+= (r.b-(r.a+gh)) < h*0.35 ? ',' : '.'; continue; }  // 小さい点＝区切り
+      if(gw<h*0.12) { s+='1'; continue; }                                                // 極端に細い＝1
+      const nm=norm(cm), hn=holes(cm);
+      let best='?',bs=-2;
+      const same='0123456789'.split('').filter(ch=>T[ch].holes===hn);
+      const pool = same.length?same:'0123456789'.split('');
+      for(const ch of pool){ const v=score(nm,T[ch].n); if(v>bs){bs=v;best=ch;} }
+      s+= bs>0.55 ? best : '?';
+    }
+    out.push({y:(r.a+r.b)/2, text:s, h});
+  }
+  return out;
+}
+
+/* 「1,234」「62,950.00」を数値に。区切りの直後が3桁なら桁区切り、1〜2桁なら小数点。 */
+function parseNum(t){
+  if(/[?]/.test(t)) return null;
+  if(!/^[\d.,]+$/.test(t)) return null;
+  const parts=t.split(/[.,]/);
+  if(parts.some(p=>p==='')) return null;
+  let s=parts[0];
+  for(let i=1;i<parts.length;i++){
+    if(parts[i].length===3) s+=parts[i];              // 桁区切り
+    else if(i===parts.length-1 && parts[i].length<=2) s+='.'+parts[i];  // 小数
+    else return null;
+  }
+  const v=parseFloat(s);
+  return isFinite(v)?v:null;
+}
+
+/* 価格軸を読み、y→価格 の直線を返す。読めた数字が直線に乗らなければ null。 */
+/* 目盛りの間隔は 1・2・2.5・5 ×10^n のいずれかになるのが普通 */
+function roundStep(v){
+  if(!(v>0)) return false;
+  const e=Math.pow(10, Math.floor(Math.log10(v)));
+  const m=v/e;
+  return [1,2,2.5,5,10].some(k=>Math.abs(m-k)<0.02*k);
+}
+const bare=t=>t.replace(/[.,]/g,'');
+
+/* 価格軸を読み、y→価格 の直線を返す。読めた数字が直線に乗らなければ null。 */
+function autoScale(D,W,H,reg){
+  const pad=Math.round((reg.y1-reg.y0)*0.12);
+  const ya=Math.max(0,reg.y0-pad), yb=Math.min(H-1,reg.y1+pad);
+  let best=null;
+  for(const f of [0.70,0.76,0.82,0.86,0.90]){
+    const xa=Math.round(W*f);
+    let rows; try{ rows=readAxis(D,W,H,xa,ya,yb); }catch(e){ continue; }
+    if(!rows||rows.length<2) continue;
+    const full=[];
+    rows.forEach(r=>{ const v=parseNum(r.text); if(v!==null&&r.h>=12) full.push({y:r.y,v,h:r.h,t:r.text}); });
+    if(full.length<2) continue;
+    // 同じ字の大きさのものだけを使う（RSI 欄などの別の軸を混ぜない）
+    const hs=full.map(p=>p.h).sort((a,b)=>a-b);
+    const hMed=hs[hs.length>>1];
+    const use=full.filter(p=>Math.abs(p.h-hMed)<=2);
+    if(use.length<2) continue;
+    // 2点ずつ試して、いちばん多くの点が乗る直線を選ぶ
+    let win=null;
+    for(let i=0;i<use.length;i++) for(let j=i+1;j<use.length;j++){
+      const dy=use[j].y-use[i].y; if(!dy) continue;
+      const a=(use[j].v-use[i].v)/dy; if(a>=0) continue;
+      const b=use[i].v-a*use[i].y;
+      const stp=Math.abs(a*dy);
+      if(!roundStep(stp)) continue;
+      const tol=Math.max(1e-9, stp*0.02);
+      const inl=use.filter(p=>Math.abs(p.v-(a*p.y+b))<=tol);
+      if(!win||inl.length>win.inl.length) win={a,b,inl,stp};
+    }
+    if(!win||win.inl.length<2) continue;
+    if(win.inl.length<Math.max(2,Math.ceil(use.length*0.6))) continue;
+    // 一部しか読めなかった行で答え合わせ（"6?.000" が 63000 と矛盾しないか）
+    let confirm=win.inl.length, contra=0;
+    rows.forEach(r=>{
+      if(Math.abs(r.h-hMed)>2) return;
+      if(win.inl.some(p=>p.y===r.y)) return;
+      let pv=win.a*r.y+win.b;
+      if(!(pv>0)) return;
+      pv=Math.round(pv/win.stp)*win.stp;          // いちばん近い目盛りに合わせる
+      const a1=bare(r.text), b1=bare(String(pv));
+      if(a1.length!==b1.length) return;                 // 別物とみなして無視
+      let ok=true;
+      for(let k=0;k<a1.length;k++) if(a1[k]!=='?'&&a1[k]!==b1[k]) ok=false;
+      ok?confirm++:contra++;
+    });
+    if(contra>0) continue;
+    const q=win.inl, n=q.length;
+    const my=q.reduce((s2,p)=>s2+p.y,0)/n, mv=q.reduce((s2,p)=>s2+p.v,0)/n;
+    let sxy=0,sxx=0,svv=0;
+    q.forEach(p=>{ sxy+=(p.y-my)*(p.v-mv); sxx+=(p.y-my)**2; svv+=(p.v-mv)**2; });
+    if(!sxx||!svv) continue;
+    const a=sxy/sxx, b=mv-a*my, r2=(sxy*sxy)/(sxx*svv);
+    if(a>=0||r2<0.9999) continue;
+    const sc={a,b,r2,n,confirm,step:win.stp,rows:q.map(p=>p.v).sort((x,y)=>y-x)};
+    if(!best||sc.confirm>best.confirm||(sc.confirm===best.confirm&&sc.n>best.n)) best=sc;
+  }
+  return best;
+}
+
 /* ================= 4. 予測（すべて画面の縦方向＝ピクセルで計算） ================= */
 let spare=null;
 function randn(){
@@ -826,6 +1032,21 @@ function analyze(){
   const sim=simulate(vals,o);
   if(!bandsOk(sim)) return fail('予測値の計算に失敗しました（数値が異常です）。'
     + '詳細設定の「予測する本数」「シナリオ試行回数」を既定値に戻してお試しください。');
+
+  // 価格軸を自動で読む（手入力が空のときだけ）
+  if(!A.manualCal){
+    const yT=Math.min(...cs.map(c=>c.hiY)), yB=Math.max(...cs.map(c=>c.loY));
+    let ax=null; try{ ax=autoScale(D,W,H,reg); }catch(e){ ax=null; }
+    if(ax && yT!==yB){
+      const hi=ax.a*yT+ax.b, lo=ax.a*yB+ax.b;
+      if(isFinite(hi)&&isFinite(lo)&&hi>lo&&lo>0){
+        const dg=Math.abs(ax.step)>=100?0:2;
+        $('pHigh').value=$('pHigh2').value=hi.toFixed(dg);
+        $('pLow').value =$('pLow2').value =lo.toFixed(dg);
+        A.axis=ax; A.autoCal=true;
+      } else { A.axis=null; A.autoCal=false; }
+    } else { A.axis=null; A.autoCal=false; }
+  }
 
   const pitch=cs.length>1?(cs[cs.length-1].xc-cs[0].xc)/(cs.length-1):8;
   const rr=cs.map(c=>c.loY-c.hiY).sort((a,b)=>a-b);
@@ -1480,6 +1701,8 @@ function selfTest(){
   const im=new Image();
   im.onload=()=>{
     A.mode='image'; A.img=im; A.W=W; A.H=H;
+    A.manualCal=false; A.autoCal=false; A.axis=null;
+    $('pHigh').value=$('pLow').value=$('pHigh2').value=$('pLow2').value='';
     const o2=document.createElement('canvas'); o2.width=W; o2.height=H;
     const oc=o2.getContext('2d',{willReadFrequently:true});
     oc.drawImage(im,0,0);
@@ -1632,8 +1855,20 @@ document.querySelectorAll('#driftSeg button').forEach(b=>{
 ['horizon','model','paths','orient','showPaths','showSide','window','vol'].forEach(id=>
   $(id).onchange=()=>{ if(A.data) analyze(); });
 $('sens').onchange=()=>{ A.manualSens=true; if(A.data) analyze(); };
-const redraw=()=>{ if(!A.res) return; if(A.res.mode!=='csv') draw(); summarize(); };
-['pHigh','pLow'].forEach(id=> $(id).oninput=redraw);
+const paintCal=()=>{
+  const box=$('calBox'), t=$('calTitle');
+  const on=isFinite(parseFloat($('pHigh').value))&&isFinite(parseFloat($('pLow').value));
+  box.style.borderColor = on?'var(--line)':'#d29922';
+  box.style.background  = on?'var(--panel2)':'rgba(210,153,34,.10)';
+  t.style.color = on?'var(--fg)':'#e3b341';
+  t.innerHTML = A.autoCal && A.axis
+      ? `価格軸を自動で読みました（目盛り ${A.axis.rows.map(v=>v.toLocaleString('ja-JP')).join(' / ')}）。`
+        + `違っていたらここを直してください`
+      : (on ? '円で表示中（数字を変えるとすぐ反映されます）'
+            : 'ここに2つ入れると、チャートの札が「幅」から「円」に変わります');
+};
+const redraw=()=>{ paintCal(); if(!A.res) return; if(A.res.mode!=='csv') draw(); summarize(); };
+['pHigh','pLow'].forEach(id=> $(id).oninput=()=>{ A.manualCal=true; A.autoCal=false; redraw(); });
 
 // 目立つ場所の価格入力 → 詳細設定側と同期して即反映（チャートの線ラベルも更新）
 const syncCal=()=>{
@@ -1641,8 +1876,9 @@ const syncCal=()=>{
   $('pLow').value =$('pLow2').value;
   redraw();
 };
-$('applyCal').onclick=syncCal;
-['pHigh2','pLow2'].forEach(id=>$(id).oninput=syncCal);
+$('applyCal').onclick=()=>{ A.manualCal=true; A.autoCal=false; syncCal(); };
+paintCal();
+['pHigh2','pLow2'].forEach(id=>$(id).oninput=()=>{ A.manualCal=true; A.autoCal=false; syncCal(); });
 </script>
 </body>
 </html>
