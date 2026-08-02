@@ -71,7 +71,7 @@ th{color:var(--dim);font-weight:600;font-size:11px}
     <div class="sub">スクリーンショットまたはCSVを入れるだけ。設定不要で読み取り、この先の想定を描きます。</div>
   </div>
   <span style="background:#1f6feb;color:#fff;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700">
-    ver&nbsp;H</span>
+    ver&nbsp;I</span>
   <button id="selftest" class="ghost">動作テスト</button>
   <button id="pick">ファイルを選ぶ</button>
 </header>
@@ -97,6 +97,8 @@ th{color:var(--dim);font-weight:600;font-size:11px}
         
         <span><span class="sw" style="background:rgba(47,129,247,.45)"></span>50%の範囲</span>
         <span><span class="sw" style="background:rgba(47,129,247,.16)"></span>90%の範囲</span>
+        <span><span class="sw" style="background:#4d9bff"></span>上値（抵抗）</span>
+        <span><span class="sw" style="background:#e8506a"></span>下値（支持）</span>
       </div>
 
       <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -107,6 +109,20 @@ th{color:var(--dim);font-weight:600;font-size:11px}
           <button data-d="est">トレンドそのまま</button>
         </div>
         <span class="dim" style="font-size:11.5px">直近の傾きをどれだけ先に延ばすか</span>
+      </div>
+
+      <div id="calBox" style="margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--panel2)">
+        <div style="font-weight:700;font-size:13px;margin-bottom:4px">円で表示する（2つ入れるだけ）</div>
+        <div class="dim" style="font-size:12px;margin-bottom:8px">
+          スクショに写っている<b>いちばん高い値段</b>と<b>いちばん安い値段</b>を入れてください。
+          目盛りの数字でも、ローソク足の天井・底の値でも構いません。入れると上値・下値が円で出ます。</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div style="flex:1;min-width:140px"><label>いちばん高い値段</label>
+            <input id="pHigh2" type="number" step="any" placeholder="例 65510"></div>
+          <div style="flex:1;min-width:140px"><label>いちばん安い値段</label>
+            <input id="pLow2" type="number" step="any" placeholder="例 60520"></div>
+          <button id="applyCal" class="ghost" style="height:38px">円で表示</button>
+        </div>
       </div>
 
       <button id="again" class="ghost hidden" style="margin-top:10px">別の画像を読み込む</button>
@@ -148,6 +164,13 @@ th{color:var(--dim);font-weight:600;font-size:11px}
         </div>
         <div id="diag" class="dim" style="font-size:12px;margin-top:12px"></div>
       </details>
+    </div>
+
+    <div class="card hidden" id="lvCard">
+      <h2 style="margin:0 0 4px;font-size:15px">上値・下値のめやす（抵抗・支持）</h2>
+      <div class="dim" style="font-size:12px">過去に価格が何度も跳ね返された高さです。<b>予言ではなく実績</b>で、
+        そこで必ず止まる保証はありません。触れた回数が多いほど意識されやすい、という目安です。</div>
+      <div id="lvBody" style="margin-top:10px"></div>
     </div>
 
     <div class="card">
@@ -494,6 +517,66 @@ function dropStrays(cs){
   return cs;
 }
 
+/* ================= 抵抗・支持の水準 =================
+   「反転した高さ」を拾って近いもの同士をまとめる。何度も反転した高さほど
+   多くの人に意識されている、という実績の集計であって予測ではない。   */
+function findLevels(cs, atrPx){
+  const n=cs.length;
+  if(n<12) return {levels:[], pivots:[]};
+  const w=Math.max(2, Math.round(n/30));           // 前後これだけの範囲で最も外側＝反転点
+  const piv=[];
+  for(let i=w;i<n-w;i++){
+    let isHi=true, isLo=true;
+    for(let k=i-w;k<=i+w;k++){
+      if(k===i) continue;
+      if(cs[k].hiY<cs[i].hiY) isHi=false;          // 画面のyは下ほど大きい＝小さいy が高値
+      if(cs[k].loY>cs[i].loY) isLo=false;
+    }
+    if(isHi) piv.push({y:cs[i].hiY, i, t:1});
+    if(isLo) piv.push({y:cs[i].loY, i, t:-1});
+  }
+  if(piv.length<2) return {levels:[], pivots:piv};
+  const tol=Math.max(3, atrPx*0.85);               // 1本の値幅くらいまで「同じ高さ」とみなす
+  const sorted=piv.slice().sort((a,b)=>a.y-b.y);
+  const cl=[]; let cur=null;
+  sorted.forEach(p=>{
+    if(cur && p.y-cur.y1<=tol){ cur.ps.push(p); cur.y1=p.y; }
+    else { if(cur) cl.push(cur); cur={ps:[p], y1:p.y}; }
+  });
+  if(cur) cl.push(cur);
+  const levels=cl.map(c=>{
+    const y=c.ps.reduce((a,p)=>a+p.y,0)/c.ps.length;
+    const last=Math.max(...c.ps.map(p=>p.i));
+    const both=c.ps.some(p=>p.t>0) && c.ps.some(p=>p.t<0);   // 抵抗と支持が入れ替わった＝強い
+    const recency=0.55+0.45*(last/(n-1));
+    return {y, touches:c.ps.length, last, both,
+            score:c.ps.length*recency*(both?1.35:1)};
+  }).filter(l=>l.touches>=2);
+  return {levels, pivots:piv};
+}
+
+/* 現在値から見て、上と下で近い順に水準を並べる。
+   何度も反発した水準が無い側は、直近の高値／安値を「1回」として出す。 */
+function pickLevels(found, closeY, atrPx, cs){
+  const {levels,pivots}=found;
+  const far=l=>Math.abs(l.y-closeY)>=atrPx*0.5;             // 現在値に重なるものは除く
+  const byDist=(a,b)=>Math.abs(a.y-closeY)-Math.abs(b.y-closeY);
+  let up  =levels.filter(l=>l.y<closeY && far(l)).sort(byDist).slice(0,3);
+  let down=levels.filter(l=>l.y>closeY && far(l)).sort(byDist).slice(0,3);
+  const fallback=side=>{
+    // 反発が繰り返された水準が無い側は、直近で最も外側だった値を示す
+    const c=pivots.filter(p=> side>0 ? (p.y<closeY&&p.t>0) : (p.y>closeY&&p.t<0))
+                  .filter(p=>Math.abs(p.y-closeY)>=atrPx*0.5);
+    if(c.length) return [{y:c.sort((a,b)=>b.i-a.i)[0].y, touches:1, both:false, recent:true}];
+    // それも無ければ、読み取った範囲の端
+    const y = side>0 ? Math.min(...cs.map(k=>k.hiY)) : Math.max(...cs.map(k=>k.loY));
+    return Math.abs(y-closeY)>=atrPx*0.5 ? [{y, touches:1, both:false, edge:true}] : [];
+  };
+  if(!up.length)   up=fallback(1);
+  if(!down.length) down=fallback(-1);
+  return {up, down};
+}
+
 /* ---- 陽線の色を、始値が前の終値に近くなる方に決める ---- */
 function orient(cs, forceFlip){
   const val=flip=>{
@@ -745,7 +828,11 @@ function analyze(){
     + '詳細設定の「予測する本数」「シナリオ試行回数」を既定値に戻してお試しください。');
 
   const pitch=cs.length>1?(cs[cs.length-1].xc-cs[0].xc)/(cs.length-1):8;
-  A.res={pal,reg,cs,sim,o,pitch,minPx,ms:Math.round(performance.now()-t0)};
+  const rr=cs.map(c=>c.loY-c.hiY).sort((a,b)=>a-b);
+  const atrPx=rr[rr.length>>1]||4;
+  const found=findLevels(cs, atrPx);
+  const lv=pickLevels(found, cs[cs.length-1].closeY, atrPx, cs);
+  A.res={pal,reg,cs,sim,o,pitch,minPx,found,lv,atrPx,ms:Math.round(performance.now()-t0)};
   draw(); summarize(); reveal();
 }
 function fail(msg){
@@ -958,6 +1045,26 @@ function draw(){
   drawPath(sim.main, '#ffb020', true, true);
   g.setLineDash([]);
 
+  // 抵抗（上）と支持（下）の水準を横一線で引く
+  const lv=A.res.lv;
+  if(lv){
+    const drawLv=(l,col,txt)=>{
+      g.strokeStyle=col; g.lineWidth=px(l.touches>=3?2.4:1.6);
+      g.setLineDash(l.touches>=3?[]:[px(10),px(7)]);
+      g.beginPath(); g.moveTo(0,l.y); g.lineTo(axisX+fcW,l.y); g.stroke();
+      g.setLineDash([]);
+      const fs=Math.round(px(12.5));
+      g.font=`700 ${fs}px -apple-system,sans-serif`; g.textAlign='left';
+      const t=`${txt}　${l.recent||l.edge?'直近':l.touches+'回'}`, tw=g.measureText(t).width;
+      const bx=Math.min(axisX+fcW-tw-14, lastX+pitch*1.2);
+      g.fillStyle='rgba(9,10,25,.82)';
+      g.fillRect(bx, l.y-fs*1.05, tw+10, fs*1.4);
+      g.fillStyle=col; g.fillText(t, bx+5, l.y+fs*0.28);
+    };
+    lv.up.slice(0,2).forEach((l,i)=>drawLv(l, i?'rgba(120,175,255,.75)':'#4d9bff', i?'上値②':'上値①'));
+    lv.down.slice(0,2).forEach((l,i)=>drawLv(l, i?'rgba(232,80,100,.75)':'#e8506a', i?'下値②':'下値①'));
+  }
+
   // 現在地
   g.setLineDash([5,5]); g.strokeStyle='rgba(139,148,158,.8)'; g.lineWidth=1;
   g.beginPath(); g.moveTo(lastX,cy0); g.lineTo(lastX,cy1); g.stroke();
@@ -1106,6 +1213,44 @@ function summarizeCsv(){
   writeDiag(diag,bt,o,btAlt);
 }
 
+/* ---- 上値・下値の一覧を書き出す ---- */
+function writeLevels(priced, v2p, unit){
+  const {cs,sim,lv,atrPx}=A.res;
+  const card=$('lvCard');
+  if(!lv || (!lv.up.length && !lv.down.length)){ card.classList.add('hidden'); return; }
+  card.classList.remove('hidden');
+  const closeY=cs[cs.length-1].closeY;
+  const eb=sim.bands[sim.bands.length-1];
+  const p95y=-eb.p95, p5y=-eb.p5;                     // 画面座標に戻す（上限は y が小さい）
+  const val=y=>priced ? Math.round(v2p(-y)).toLocaleString('ja-JP')+' 円'
+                      : ((closeY-y)/unit>=0?'+':'') + ((closeY-y)/unit).toFixed(1)+' 幅';
+  const dist=y=>`現在値から ${(Math.abs(closeY-y)/unit).toFixed(1)} 幅`;
+  const row=(l,i,side)=>{
+    const reach = side>0 ? (l.y>=p95y) : (l.y<=p5y);   // 24本先の90%の範囲に入るか
+    const strong = l.touches>=3 || l.both;
+    return `<tr>
+      <td style="white-space:nowrap"><b style="color:${side>0?'#4d9bff':'#e8506a'}">${side>0?'上値':'下値'}${'①②③'[i]}</b></td>
+      <td style="font-weight:700;font-size:15px">${val(l.y)}</td>
+      <td class="dim" style="font-size:12px">${dist(l.y)}</td>
+      <td style="font-size:12px">${l.touches} 回${l.both?'・上下入れ替わり':''}
+        <span class="dim">${strong?'／効きやすい':'／弱め'}</span></td>
+      <td style="font-size:12px;color:${reach?'#d29922':'var(--dim)'}">${reach?'届きうる':'届きにくい'}</td>
+    </tr>`;
+  };
+  $('lvBody').innerHTML =
+    `<table style="width:100%;border-collapse:collapse">
+       <tr class="dim" style="font-size:11.5px;text-align:left">
+         <th></th><th>水準</th><th>距離</th><th>反発した回数</th><th>${A.res.o.horizon}本先までに</th></tr>
+       ${lv.up.map((l,i)=>row(l,i,1)).reverse().join('')}
+       <tr><td colspan="5" style="padding:6px 0"><div style="border-top:1px dashed var(--line)"></div></td></tr>
+       <tr><td><b>現在値</b></td><td style="font-weight:700">${priced?Math.round(v2p(-closeY)).toLocaleString('ja-JP')+' 円':'基準'}</td><td colspan="3"></td></tr>
+       <tr><td colspan="5" style="padding:6px 0"><div style="border-top:1px dashed var(--line)"></div></td></tr>
+       ${lv.down.map((l,i)=>row(l,i,-1)).join('')}
+     </table>`
+   + (priced?'':`<div class="dim" style="font-size:12px;margin-top:10px">
+       ※ 円で出すには、上の「円で表示する」に高値と安値を入れてください。</div>`);
+}
+
 function summarize(){
   if(A.res && A.res.mode==='csv') return summarizeCsv();
   const {cs,sim,o,pal,reg,minPx,ms}=A.res;
@@ -1129,6 +1274,7 @@ function summarize(){
 
   writeOutcome(sim,o,fmtV,nowTxt,rng,[['読み取ったローソク足', cs.length+' 本','']]);
   writeDiag(diagnose(cs.map(c=>-c.closeY)), null, o);
+  writeLevels(priced, v2p, unit);
 
   const st=$('status');
   st.className='status';
@@ -1451,6 +1597,15 @@ document.querySelectorAll('#driftSeg button').forEach(b=>{
 $('sens').onchange=()=>{ A.manualSens=true; if(A.data) analyze(); };
 ['pHigh','pLow'].forEach(id=>
   $(id).oninput=()=>{ if(A.res) summarize(); });
+
+// 目立つ場所の価格入力 → 詳細設定側と同期して即反映
+const syncCal=()=>{
+  $('pHigh').value=$('pHigh2').value;
+  $('pLow').value =$('pLow2').value;
+  if(A.res) summarize();
+};
+$('applyCal').onclick=syncCal;
+['pHigh2','pLow2'].forEach(id=>$(id).oninput=syncCal);
 </script>
 </body>
 </html>
