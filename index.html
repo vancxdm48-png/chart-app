@@ -1,0 +1,1403 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>チャート自動予測</title>
+<style>
+:root{--bg:#0d1117;--panel:#161b22;--panel2:#1c2330;--line:#2b3444;--fg:#e6edf3;
+ --dim:#8b949e;--accent:#2f81f7;--up:#26d0c4;--down:#e8434f;--warn:#d29922}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-size:14px;line-height:1.6;
+ font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif}
+header{padding:16px 20px;border-bottom:1px solid var(--line);background:var(--panel)}
+h1{margin:0;font-size:17px}
+.sub{color:var(--dim);font-size:12px;margin-top:3px}
+.wrap{max-width:1100px;margin:0 auto;padding:18px}
+.drop{border:2px dashed var(--line);border-radius:12px;padding:44px 20px;text-align:center;
+ background:var(--panel);cursor:pointer;transition:.15s}
+.drop:hover,.drop.hot{border-color:var(--accent);background:var(--panel2)}
+.drop .big{font-size:16px;font-weight:600}
+.drop .small{color:var(--dim);font-size:12.5px;margin-top:6px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin-top:16px}
+canvas{max-width:100%;border-radius:8px;display:block}
+button{background:var(--accent);color:#fff;border:0;border-radius:6px;padding:7px 13px;
+ font-size:13px;cursor:pointer;font-family:inherit}
+button:hover{filter:brightness(1.15)}
+button.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--fg)}
+button.on{background:var(--up);color:#04201f;font-weight:700}
+input,select{background:var(--panel2);border:1px solid var(--line);color:var(--fg);
+ border-radius:6px;padding:6px 8px;font-family:inherit;font-size:13px;width:100%}
+label{color:var(--dim);font-size:11.5px;display:block;margin-bottom:3px}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.row>div{flex:1;min-width:120px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:10px;margin-bottom:14px}
+.kpi{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 11px}
+.kpi .l{color:var(--dim);font-size:11px}
+.kpi .v{font-size:18px;font-weight:700;margin-top:1px;font-variant-numeric:tabular-nums}
+.up{color:var(--up)}.down{color:var(--down)}.dim{color:var(--dim)}
+.status{padding:8px 11px;border-radius:6px;background:var(--panel2);
+ border-left:3px solid var(--accent);font-size:12.5px;margin-top:12px}
+.status.warn{border-left-color:var(--warn)}
+.status.ok{border-left-color:var(--up)}
+.status.err{border-left-color:var(--down)}
+details{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
+summary{cursor:pointer;color:var(--dim);font-size:12.5px}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--dim);margin-top:10px}
+.sw{width:13px;height:13px;border-radius:3px;display:inline-block;vertical-align:-2px}
+table{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums;margin-top:10px}
+th,td{padding:5px 8px;border-bottom:1px solid var(--line);text-align:right}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--dim);font-weight:600;font-size:11px}
+.disc{background:#2a2113;border:1px solid #5a4718;color:#f0d9a0;border-radius:8px;
+ padding:10px 13px;font-size:12.5px;margin-top:16px}
+.hidden{display:none}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{border-radius:0;background:var(--panel2);color:var(--dim);padding:6px 12px}
+.seg button.on{background:var(--accent);color:#fff;font-weight:600}
+</style>
+</head>
+<body>
+<header style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+  <div style="flex:1;min-width:240px">
+    <h1>チャート自動予測</h1>
+    <div class="sub">スクリーンショットまたはCSVを入れるだけ。設定不要で読み取り、この先の想定を描きます。</div>
+  </div>
+  <span style="background:#1f6feb;color:#fff;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700">
+    ver&nbsp;G</span>
+  <button id="selftest" class="ghost">動作テスト</button>
+  <button id="pick">ファイルを選ぶ</button>
+</header>
+
+<div class="wrap">
+
+  <div class="drop" id="drop">
+    <div class="big">チャート画像 または CSV をここにドロップ</div>
+    <div class="small">画像＝スクショから自動で読み取り／CSV＝実価格をそのまま使用（精度が上がります）。<br>
+    クリックして選択・⌘V/Ctrl+V で貼り付けも可。読み込んだ瞬間に自動で解析します。</div>
+    <input type="file" id="file" accept="image/*,.csv,.tsv,.txt" class="hidden">
+  </div>
+
+  <div id="out" class="hidden">
+    <div class="card">
+      <div class="kpis" id="kpis"></div>
+      <div id="status" class="status" style="margin:0 0 10px"></div>
+      <div id="verdict" class="status" style="margin:0 0 12px"></div>
+      <canvas id="view"></canvas>
+      <div class="legend">
+        <span><span class="sw" style="background:#ffb020"></span><b style="color:#ffb020">予測ライン</b>（向きが不明なときは中央＝ほぼ水平）</span>
+        <span><span class="sw" style="background:#e6edf3"></span>読み取った終値</span>
+        
+        <span><span class="sw" style="background:rgba(47,129,247,.45)"></span>50%の範囲</span>
+        <span><span class="sw" style="background:rgba(47,129,247,.16)"></span>90%の範囲</span>
+      </div>
+
+      <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <span class="dim" style="font-size:12px">先読みの前提：</span>
+        <div class="seg" id="driftSeg">
+          <button data-d="zero" class="on">トレンドなし</button>
+          <button data-d="half">トレンド半分</button>
+          <button data-d="est">トレンドそのまま</button>
+        </div>
+        <span class="dim" style="font-size:11.5px">直近の傾きをどれだけ先に延ばすか</span>
+      </div>
+
+      <button id="again" class="ghost hidden" style="margin-top:10px">別の画像を読み込む</button>
+
+      <details>
+        <summary>詳細設定（うまく読めなかったときだけ触ってください）</summary>
+        <div class="row" style="margin-top:12px">
+          <div><label>予測する本数</label><input id="horizon" type="number" value="24" min="1" max="200"></div>
+          <div><label>モデル</label><select id="model">
+            <option value="boot">ブートストラップ（推奨）</option>
+            <option value="gbm">正規分布</option>
+            <option value="ar1">AR(1)</option>
+          </select></div>
+          <div><label>値幅の見積り方</label><select id="vol">
+            <option value="ewma" selected>直近を重視（EWMA・推奨）</option>
+            <option value="const">全期間で一定</option>
+          </select></div>
+          <div><label>推定に使う本数（CSV時・0で全部）</label>
+            <input id="window" type="number" value="500" min="0" max="100000"></div>
+          <div><label>シナリオ試行回数</label><select id="paths">
+            <option>2000</option><option selected>10000</option><option>50000</option></select></div>
+          <div><label>陽線の色</label><select id="orient">
+            <option value="auto">自動判定</option><option value="flip">自動判定の逆</option>
+          </select></div>
+          <div><label>個別シナリオの細線</label>
+            <label style="color:var(--fg);font-size:13px;display:flex;align-items:center;gap:6px;margin-top:6px">
+              <input type="checkbox" id="showPaths" style="width:auto"> 表示する</label></div>
+          <div><label>上下シナリオを薄く併記</label>
+            <label style="color:var(--fg);font-size:13px;display:flex;align-items:center;gap:6px;margin-top:6px">
+              <input type="checkbox" id="showSide" style="width:auto"> 表示する</label></div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <div><label>感度（通常は自動。動かすと手動固定になります）</label>
+            <input id="sens" type="range" min="2" max="14" step="1" value="4"></div>
+          <div><label>チャート内の最高値（任意・円で表示したい場合）</label>
+            <input id="pHigh" type="number" step="any" placeholder="例 64130"></div>
+          <div><label>チャート内の最安値（任意）</label>
+            <input id="pLow" type="number" step="any" placeholder="例 62630"></div>
+        </div>
+        <div id="diag" class="dim" style="font-size:12px;margin-top:12px"></div>
+      </details>
+    </div>
+
+    <div class="card">
+      <h2 style="margin:0 0 4px;font-size:15px">この先どこまで動きうるか</h2>
+      <div class="dim" style="font-size:12px">CSVを読み込んだ場合は実価格（円）。画像の場合は「1本あたりの平均的な値動き」を1とした相対表示です。</div>
+      <table id="tbl"></table>
+    </div>
+
+    <div class="card hidden" id="stats">
+      <h2 style="margin:0 0 4px;font-size:15px">このデータで何が読めるか（統計診断）</h2>
+      <div class="dim" style="font-size:12px">予測を信じてよいかどうかを、データ自身に判定させた結果です。</div>
+      <table id="acTbl"></table>
+      <div id="acNote" class="dim" style="font-size:11.5px;margin-top:8px"></div>
+      <h3 style="margin:16px 0 4px;font-size:13.5px">予測区間は当たっているか（バックテスト）</h3>
+      <div id="btBox"></div>
+    </div>
+  </div>
+
+  <div class="disc">
+    <strong>免責</strong>：過去の値動きの散らばりから、同じ性質が続いた場合にどこまで散らばりうるかを計算しているだけで、将来の価格を予知するものではありません。
+    ニュース・需給・相場つきの変化は一切含みません。投資判断はご自身の責任でお願いします。
+  </div>
+</div>
+
+<script>
+"use strict";
+
+const $ = id => document.getElementById(id);
+// 数値の取り出し。NaNや空欄でも必ず有効な値になるようにする
+// （ここが NaN になると予測値が全部 NaN になり、線が一本も描かれなくなる）
+const num=(v,def,lo,hi)=>{ const n=parseFloat(v); return isFinite(n)?Math.max(lo,Math.min(hi,n)):def; };
+// 想定外のエラーでも黙って止まらず、必ず画面に出す
+window.addEventListener('error', ev=>{
+  const el=document.getElementById('status');
+  if(!el) return;
+  document.getElementById('out').classList.remove('hidden');
+  el.className='status err';
+  el.innerHTML='想定外のエラーが発生しました：'+(ev.message||'')
+    +'<br><span style="font-size:11.5px">'+(ev.filename||'')+' '+(ev.lineno||'')+'行目</span>';
+});
+window.addEventListener('unhandledrejection', ev=>{
+  const el=document.getElementById('status');
+  if(!el) return;
+  document.getElementById('out').classList.remove('hidden');
+  el.className='status err';
+  el.innerHTML='処理中にエラーが発生しました：'+(ev.reason&&ev.reason.message||ev.reason||'');
+});
+const A = { mode:'image', img:null, data:null, W:0, H:0, series:null, res:null, drift:'zero', manualSens:false };
+
+/* ================= 色ユーティリティ ================= */
+function rgbToHsv(r,g,b){
+  r/=255; g/=255; b/=255;
+  const mx=Math.max(r,g,b), mn=Math.min(r,g,b), d=mx-mn;
+  let h=0;
+  if(d>0){
+    if(mx===r) h=60*(((g-b)/d)%6);
+    else if(mx===g) h=60*((b-r)/d+2);
+    else h=60*((r-g)/d+4);
+  }
+  if(h<0) h+=360;
+  return [h, mx===0?0:d/mx, mx];
+}
+const hueDist=(a,b)=>{ const d=Math.abs(a-b); return d>180?360-d:d; };
+
+const MINSAT=0.40, MINVAL=0.30, HUETOL=22;   // 彩度は端末やテーマで薄くなるので低めに取り、
+                                             // 線とローソクの区別は「縦の伸び方」で行う
+
+/* ================= 1. 色の自動判別 =================
+   彩度の高い画素の色相ピークを拾い、「縦に長く連なるか」で
+   ローソク足の色と、移動平均などの細い線の色を切り分ける。   */
+function autoPalette(D,W,H){
+  const bins=new Float64Array(72);
+  const step = Math.max(1, Math.round(Math.sqrt(W*H/400000)));
+  let tot=0;
+  for(let y=0;y<H;y+=step) for(let x=0;x<W;x+=step){
+    const i=(y*W+x)*4;
+    const [h,s,v]=rgbToHsv(D[i],D[i+1],D[i+2]);
+    if(s<MINSAT||v<MINVAL) continue;
+    bins[Math.floor(h/5)%72]++; tot++;
+  }
+  if(!tot) return null;
+  const order=[...bins.keys()].sort((a,b)=>bins[b]-bins[a]);
+  const peaks=[];
+  for(const k of order){
+    if(bins[k] < tot*0.01) break;
+    const hc=k*5+2.5;
+    if(peaks.every(p=>hueDist(hc,p)>25)) peaks.push(hc);
+    if(peaks.length>=6) break;
+  }
+  // 各色相について「列ごとの縦の最長連続長」を測る
+  const stats = peaks.map(p=>{
+    const segs=[];
+    for(let x=0;x<W;x+=step){
+      let best=0,cur=0;
+      for(let y=0;y<H;y++){
+        const i=(y*W+x)*4;
+        const [h,s,v]=rgbToHsv(D[i],D[i+1],D[i+2]);
+        if(s>=MINSAT&&v>=MINVAL&&hueDist(h,p)<=HUETOL){ cur++; if(cur>best) best=cur; }
+        else cur=0;
+      }
+      segs.push(best);
+    }
+    // 1〜2px しかない画素は点線やアンチエイリアスの残りなので、
+    // 「縦にどこまで伸びる色か」を測る母集団から外す。
+    const runs=segs.filter(v=>v>=3).sort((a,b)=>a-b);
+    if(!runs.length) return {hue:p, sel:0, groups:0, med:0, n:0};
+    const sel=runs[Math.floor(runs.length*0.98)];       // 縦にどこまで伸びるか
+    const thr=Math.max(4, sel*0.30);
+    // 「縦に長い列」がいくつの塊に分かれているか。
+    // ローソク足は1本ずつ離れて並ぶので塊が多く、移動平均線は繋がって少ない。
+    let groups=0, inG=false;
+    segs.forEach(v=>{ const q=v>=thr; if(q&&!inG) groups++; inG=q; });
+    return {hue:p, sel, groups, med: runs[runs.length>>1], n:runs.length};
+  });
+  const gmax=Math.max(...stats.map(s=>s.sel));
+  const cands=stats.filter(s=> s.groups>=8 && s.sel>=Math.max(6,gmax*0.25))
+                   .sort((a,b)=>b.sel-a.sel).slice(0,2);
+  if(!cands.length) return null;
+  return {peaks, stats, hues:cands.map(c=>c.hue),
+          medRun:Math.max(3,Math.max(...cands.map(c=>c.med)))};
+}
+
+/* ================= 2. チャート領域の自動判別 ================= */
+function autoRegion(D,W,H,hues){
+  const rowM=new Float64Array(H), colM=new Float64Array(W);
+  const hit=(x,y)=>{
+    const i=(y*W+x)*4;
+    const [h,s,v]=rgbToHsv(D[i],D[i+1],D[i+2]);
+    if(s<MINSAT||v<MINVAL) return false;
+    return hues.some(p=>hueDist(h,p)<=HUETOL);
+  };
+  // 大きな画像では間引いて走査する（境界は最後に少し広げて取りこぼしを防ぐ）
+  const step=Math.max(1, Math.round(Math.sqrt(W*H/400000)));
+  for(let y=0;y<H;y++){ let n=0; for(let x=0;x<W;x+=step) if(hit(x,y)) n++; rowM[y]=n; }
+
+  const bands=(arr,gap,thr)=>{
+    const out=[]; let cur=null, g=0;
+    for(let i=0;i<arr.length;i++){
+      if(arr[i]>=thr){ if(!cur) cur={a:i,b:i,m:0}; cur.b=i; cur.m+=arr[i]; g=0; }
+      else if(cur){ if(++g>gap){ out.push(cur); cur=null; } }
+    }
+    if(cur) out.push(cur);
+    return out.sort((x,y)=>y.m-x.m);
+  };
+  const rb=bands(rowM, Math.round(H*0.015), 1);
+  if(!rb.length) return null;
+
+  // 画素量の多い順に候補を見て、チャートとして無理のない形のものを選ぶ。
+  // メニューバーや壁紙の帯のような「極端に横長で薄い」領域を弾く。
+  for(const cand of rb.slice(0,4)){
+    const y0=cand.a, y1=cand.b;
+    if(y1-y0 < Math.max(20, H*0.04)) continue;
+    for(let x=0;x<W;x++){ let n=0; for(let y=y0;y<=y1;y+=step) if(hit(x,y)) n++; colM[x]=n; }
+    const nz=[...colM].filter(v=>v>0).sort((a,b)=>a-b);
+    if(!nz.length) continue;
+    const q75=nz[Math.floor(nz.length*0.75)]||1;
+    const cb=bands(colM, Math.round(W*0.02), Math.max(2,q75*0.20));
+    if(!cb.length) continue;
+    const x0=cb[0].a, x1=cb[0].b;
+    if(x1-x0 < 20) continue;
+    if((x1-x0) > (y1-y0)*8) continue;      // 横長すぎる＝チャートではない
+    return {x0:Math.max(0,x0-step), y0:Math.max(0,y0-step),
+            x1:Math.min(W-1,x1+step), y1:Math.min(H-1,y1+step)};
+  }
+  return null;
+}
+
+/* ================= 3. ローソク足の抽出 ================= */
+function groupRows(ys,widthByY,gap){
+  const out=[]; let cur=null;
+  ys.forEach(y=>{
+    if(cur && y-cur.end<=gap){ cur.end=y; cur.sum+=widthByY.get(y)||1; }
+    else{ if(cur) out.push(cur); cur={start:y,end:y,sum:widthByY.get(y)||1}; }
+  });
+  if(cur) out.push(cur);
+  return out.length?out:[{start:ys[0],end:ys[ys.length-1],sum:1}];
+}
+
+function extract(D,W,H,reg,hues,minPx){
+  const [hA,hB]=hues.length>1?hues:[hues[0],hues[0]];
+  const cols=[];
+  for(let x=reg.x0;x<=reg.x1;x++){
+    const ys=[];
+    for(let y=reg.y0;y<=reg.y1;y++){
+      const i=(y*W+x)*4;
+      if(D[i+3]<128) continue;
+      const [h,s,v]=rgbToHsv(D[i],D[i+1],D[i+2]);
+      if(s<MINSAT||v<MINVAL) continue;
+      if(hueDist(h,hA)<=HUETOL)      ys.push({y,c:1});
+      else if(hueDist(h,hB)<=HUETOL) ys.push({y,c:-1});
+    }
+    let run=0,cur=0;
+    for(let k=0;k<ys.length;k++){
+      cur=(k>0 && ys[k].y-ys[k-1].y<=1 && ys[k].c===ys[k-1].c)?cur+1:1;
+      if(cur>run) run=cur;
+    }
+    cols.push({x,ys,run});
+  }
+  // 芯（縦に長い列）を連結してローソクの位置を決める
+  let runs=[],cur=null;
+  cols.forEach((c,i)=>{
+    if(c.run>=minPx){ if(!cur) cur={i0:i,i1:i}; else cur.i1=i; }
+    else if(cur){ runs.push(cur); cur=null; }
+  });
+  if(cur) runs.push(cur);
+  if(runs.length<3) return [];
+
+  // 幅が飛び抜けた塊は等分割（隣り合うローソクがくっついた場合）。
+  // 縮小画像では多くが繋がってしまうため、中央値ではなく下側の分位点を
+  // 「1本ぶんの幅」の基準にする。
+  const ws=runs.map(r=>r.i1-r.i0+1).sort((a,b)=>a-b);
+  const medW=ws[ws.length>>1];
+  if(medW>=2){
+    const sp=[];
+    runs.forEach(r=>{
+      const w=r.i1-r.i0+1, k=Math.round(w/medW);
+      if(k>=2 && w/k>=medW*0.6){
+        for(let j=0;j<k;j++) sp.push({i0:r.i0+Math.round(j*w/k), i1:r.i0+Math.round((j+1)*w/k)-1});
+      } else sp.push(r);
+    });
+    runs=sp.filter(r=>r.i1>=r.i0);
+  }
+
+  // 芯から左右へ広げ、実体だけの薄い列も取り込む
+  const isCore=new Uint8Array(cols.length);
+  runs.forEach(r=>{ for(let i=r.i0;i<=r.i1;i++) isCore[i]=1; });
+  const out=[];
+  runs.forEach((r,k)=>{
+    const core=[]; cols.slice(r.i0,r.i1+1).forEach(c=>c.ys.forEach(p=>core.push(p)));
+    if(!core.length) return;
+    const dir = core.filter(p=>p.c>0).length>=core.length/2 ? 1 : -1;
+    const mine0=core.filter(p=>p.c===dir);
+    if(!mine0.length) return;
+    const yLo=Math.min(...mine0.map(p=>p.y))-1, yHi=Math.max(...mine0.map(p=>p.y))+1;
+    const prev=runs[k-1], next=runs[k+1];
+    const l0=prev?Math.ceil((prev.i1+r.i0)/2):0;
+    const l1=next?Math.floor((r.i1+next.i0)/2):cols.length-1;
+    const okCol=i=> i>=l0 && i<=l1 && !isCore[i] &&
+      cols[i].ys.some(p=>p.c===dir && p.y>=yLo && p.y<=yHi);
+    let a=r.i0,b=r.i1,cap=5;
+    while(cap-->0 && okCol(a-1)) a--;
+    cap=5; while(cap-->0 && okCol(b+1)) b++;
+
+    const seg=cols.slice(a,b+1), all=[];
+    seg.forEach(c=>c.ys.forEach(p=>all.push(p)));
+    const mine=all.filter(p=>p.c===dir);
+    if(mine.length<minPx) return;
+
+    const widthByY=new Map();
+    seg.forEach(c=>{
+      const seen=new Set();
+      c.ys.forEach(p=>{ if(p.c===dir&&!seen.has(p.y)){ seen.add(p.y);
+        widthByY.set(p.y,(widthByY.get(p.y)||0)+1); } });
+    });
+    const yl=[...widthByY.keys()].sort((p,q)=>p-q);
+    const g=groupRows(yl,widthByY,2);
+    const bestG=g.reduce((p,q)=>q.sum>p.sum?q:p);
+    const hiY=bestG.start, loY=bestG.end;
+    const rows=yl.filter(y=>y>=hiY&&y<=loY);
+    const maxW=Math.max(...rows.map(y=>widthByY.get(y)));
+    let bt=hiY, bb=loY;
+    if(maxW>=2){
+      const wide=rows.filter(y=>widthByY.get(y)>=maxW*0.6);
+      if(wide.length){
+        const bg=groupRows(wide,widthByY,1);
+        const body=bg.reduce((p,q)=>(q.end-q.start)>(p.end-p.start)?q:p);
+        bt=body.start; bb=body.end;
+      }
+    }
+    out.push({xc:(seg[0].x+seg[seg.length-1].x)/2, x0:seg[0].x, x1:seg[seg.length-1].x,
+              dir, hiY, loY, bt, bb});
+  });
+  return out;
+}
+
+/* ---- 等間隔に並んでいる最長の並びだけを残す（文字や点線を除去） ---- */
+function regularize(cs){
+  if(cs.length<6) return cs;
+  const d=[]; for(let i=1;i<cs.length;i++) d.push(cs[i].xc-cs[i-1].xc);
+  const sd=d.slice().sort((a,b)=>a-b);
+  const pitch=sd[sd.length>>1];
+  if(!(pitch>0)) return cs;
+  // 等間隔の「格子」を当てはめ、そこに乗るものだけ残す。
+  // 途中で1本読み落としても列が途切れないよう、連鎖ではなく格子で判定する。
+  let best=null;
+  for(let r=0;r<cs.length;r++){
+    const ref=cs[r].xc, byK=new Map();
+    cs.forEach(c=>{
+      const k=Math.round((c.xc-ref)/pitch);
+      const err=Math.abs(c.xc-(ref+k*pitch));
+      if(err>pitch*0.35) return;
+      const prev=byK.get(k);
+      if(!prev || err<prev.err) byK.set(k,{c,err});
+    });
+    const keep=[...byK.entries()].sort((a,b)=>a[0]-b[0]).map(e=>e[1].c);
+    if(!best||keep.length>best.length) best=keep;
+  }
+  return (best && best.length>=Math.max(6,cs.length*0.5)) ? best : cs;
+}
+
+/* ---- 陽線の色を、始値が前の終値に近くなる方に決める ---- */
+function orient(cs, forceFlip){
+  const val=flip=>{
+    let e=0;
+    for(let i=1;i<cs.length;i++){
+      const p=cs[i-1], c=cs[i];
+      const pd=flip?-p.dir:p.dir, cd=flip?-c.dir:c.dir;
+      const pClose = pd>0?p.bt:p.bb;
+      const cOpen  = cd>0?c.bb:c.bt;
+      e += Math.abs(cOpen-pClose);
+    }
+    return e;
+  };
+  const flip = forceFlip!==undefined ? forceFlip : (val(true) < val(false));
+  return cs.map(c=>{
+    const d = flip?-c.dir:c.dir;
+    return {...c, dir:d, openY: d>0?c.bb:c.bt, closeY: d>0?c.bt:c.bb, flip};
+  });
+}
+
+/* ---- 読み取り結果がローソク足として妥当かを採点する ----
+   点線や罫線を拾っただけの場合、終値が一直線に並ぶ／高さが無いので弾ける。 */
+function quality(cs, reg){
+  if(cs.length<8) return 0;
+  const RH=reg.y1-reg.y0+1;
+  // 陽線/陰線の向きが決まる前でも使えるよう、実体の中心を水準とみなす
+  const ys=cs.map(c=>(c.bt+c.bb)/2);
+  const m=ys.reduce((a,b)=>a+b,0)/ys.length;
+  const sd=Math.sqrt(ys.reduce((a,b)=>a+(b-m)*(b-m),0)/ys.length);
+  const range=Math.max(...ys)-Math.min(...ys);
+  const hs=cs.map(c=>c.loY-c.hiY);
+  const mh=hs.reduce((a,b)=>a+b,0)/hs.length;
+  const hsd=Math.sqrt(hs.reduce((a,b)=>a+(b-mh)*(b-mh),0)/hs.length);
+  if(mh<3 || sd<2) return 0;
+  // 値動きが領域の高さに対して小さすぎる＝罫線の並び
+  if(range < RH*0.20 || sd < RH*0.04) return 0;
+  // どれも同じ高さで揃っている＝ボタンやタブの並び
+  if(hsd/mh < 0.15) return 0;
+  // 価格の系列は「隣どうしが近い」＝1次の自己相関が高い。
+  // Dockのアイコンなど中身のない並びは隣との関係がなく、ここで落ちる。
+  let num=0, den=0;
+  for(let i=1;i<ys.length;i++) num+=(ys[i]-m)*(ys[i-1]-m);
+  for(let i=0;i<ys.length;i++) den+=(ys[i]-m)*(ys[i]-m);
+  const ac = den ? num/den : 0;
+  // ランダムウォークの1次自己相関は概ね 1-3/n。3倍以上の余裕をしきい値にする。
+  if(ac < Math.max(0.5, 1 - 10/cs.length)) return 0;
+  return cs.length;
+}
+
+/* ================= 4. 予測（すべて画面の縦方向＝ピクセルで計算） ================= */
+let spare=null;
+function randn(){
+  if(spare!==null){ const v=spare; spare=null; return v; }
+  let u,v,s;
+  do{ u=Math.random()*2-1; v=Math.random()*2-1; s=u*u+v*v; }while(s===0||s>=1);
+  const f=Math.sqrt(-2*Math.log(s)/s); spare=v*f; return u*f;
+}
+const meanOf=a=>a.reduce((s,v)=>s+v,0)/a.length;
+function sdOf(a){ if(a.length<2) return 0; const m=meanOf(a);
+  return Math.sqrt(a.reduce((s,v)=>s+(v-m)*(v-m),0)/(a.length-1)); }
+function pctOf(s,q){ const i=(s.length-1)*q, lo=Math.floor(i), hi=Math.ceil(i);
+  return lo===hi?s[lo]:s[lo]+(s[hi]-s[lo])*(i-lo); }
+
+const QS=[0.05,0.25,0.50,0.75,0.95];
+
+/* 直近を重く見たボラティリティ（RiskMetrics流の指数加重）。
+   相場は「大きく動いた後は大きく動く」ので、全期間の平均より現在の水準に近い。 */
+function ewmaSd(d, lambda){
+  if(d.length<5) return sdOf(d);
+  const m=meanOf(d);
+  let v=0, w=0, p=1;
+  for(let i=d.length-1;i>=0;i--){ v+=p*(d[i]-m)*(d[i]-m); w+=p; p*=lambda; }
+  return Math.sqrt(v/w);
+}
+
+function simulate(vals, o){
+  const n=vals.length, last=vals[n-1];
+  const d=[]; for(let i=1;i<n;i++) d.push(vals[i]-vals[i-1]);
+  let mu=meanOf(d); let sg=sdOf(d);
+  if(o.drift==='zero') mu=0; else if(o.drift==='half') mu*=0.5;
+  let dz=d.map(v=>v-meanOf(d)+mu);
+  // 分布の形（歪み・裾の厚さ）はそのままに、大きさだけ直近の水準へ合わせる
+  if(o.vol==='ewma'){
+    const se=ewmaSd(d,0.94), s0=sdOf(d);
+    if(s0>0 && isFinite(se)){
+      const k=se/s0;
+      dz=dz.map(v=>(v-mu)*k+mu);
+      sg=se;
+    }
+  }
+
+  let a=0,b=0,resid=d;
+  if(o.model==='ar1'&&d.length>3){
+    const x=d.slice(0,-1), y=d.slice(1);
+    const mx=meanOf(x), my=meanOf(y);
+    let sxy=0,sxx=0;
+    for(let i=0;i<x.length;i++){ sxy+=(x[i]-mx)*(y[i]-my); sxx+=(x[i]-mx)**2; }
+    b=sxx?Math.max(-0.95,Math.min(0.95,sxy/sxx)):0;
+    a=my-b*mx;
+    if(o.drift==='zero') a=0; else if(o.drift==='half') a*=0.5;
+    resid=y.map((v,i)=>v-(a+b*x[i]));
+  }
+
+  const H=o.horizon, P=o.paths;
+  const ends=Array.from({length:H},()=>new Float64Array(P));
+  const samples=[]; const NS=Math.min(12,P);
+  for(let p=0;p<P;p++){
+    let cv=last, pr=d.length?d[d.length-1]:0;
+    const path=p<NS?[]:null;
+    for(let h=0;h<H;h++){
+      let s;
+      if(o.model==='gbm') s=mu+sg*randn();
+      else if(o.model==='ar1'){ s=a+b*pr+resid[(Math.random()*resid.length)|0]; pr=s; }
+      else s=dz[(Math.random()*dz.length)|0];
+      cv+=s; ends[h][p]=cv;
+      if(path) path.push(cv);
+    }
+    if(path) samples.push(path);
+  }
+  const bands=[], probUp=[];
+  for(let h=0;h<H;h++){
+    const s=Array.from(ends[h]).sort((x,y)=>x-y);
+    bands.push(Object.fromEntries(QS.map(q=>['p'+Math.round(q*100),pctOf(s,q)])));
+    let u=0; for(let i=0;i<ends[h].length;i++) if(ends[h][i]>last) u++;
+    probUp.push(u/ends[h].length);
+  }
+
+  // ---- 上シナリオ・下シナリオ ----
+  // 「上に終わった経路だけの中央値」「下に終わった経路だけの中央値」を別々に作る。
+  // ＝その方向に動いた場合の典型的な経路。
+  const fin=ends[H-1], upI=[], dnI=[];
+  for(let p=0;p<P;p++) (fin[p]>last?upI:dnI).push(p);
+  const condPath=idx=>{
+    if(!idx.length) return [];
+    const out=[];
+    for(let h=0;h<H;h++){
+      const a=new Float64Array(idx.length);
+      for(let i=0;i<idx.length;i++) a[i]=ends[h][idx[i]];
+      out.push(pctOf(Array.from(a).sort((x,y)=>x-y), 0.5));
+    }
+    return out;
+  };
+  const upPath=condPath(upI), dnPath=condPath(dnI);
+  const pUp=upI.length/P;
+
+  // ---- その「向き」は本物か ----
+  // 履歴そのものを引き直して何度も作り直し、上に終わる確率がどれだけ動くかを見る。
+  // 50%がこの幅の中に入るなら、向きは決められない＝断定してはいけない。
+  const ci=dirUncertainty(dz, H);
+  const decisive = (ci.lo>0.5) || (ci.hi<0.5);
+  const upWins = pUp>=0.5;
+
+  return {bands, probUp, samples, last, sigma:sg, mu, atr:meanOf(d.map(Math.abs)),
+          upPath, dnPath, probUpEnd:pUp, ci, decisive,
+          main: upWins?upPath:dnPath, mainDir: upWins?1:-1,
+          mainProb: upWins?pUp:1-pUp};
+}
+
+// 履歴を引き直して「上に終わる確率」のばらつきを測る
+function dirUncertainty(steps, H, B=120, P=600){
+  const n=steps.length; if(n<5) return {lo:0,hi:1};
+  const ps=[];
+  const rs=new Float64Array(n);
+  for(let b=0;b<B;b++){
+    for(let i=0;i<n;i++) rs[i]=steps[(Math.random()*n)|0];
+    let up=0;
+    for(let p=0;p<P;p++){
+      let c=0; for(let h=0;h<H;h++) c+=rs[(Math.random()*n)|0];
+      if(c>0) up++;
+    }
+    ps.push(up/P);
+  }
+  ps.sort((a,b)=>a-b);
+  return {lo:ps[Math.floor(B*0.05)], hi:ps[Math.min(B-1,Math.floor(B*0.95))]};
+}
+
+// 予測値が有限かどうかを確かめる（1つでもNaNがあると何も描かれないため）
+function bandsOk(sim){
+  if(!sim||!sim.bands||!sim.bands.length) return false;
+  if(!isFinite(sim.last)) return false;
+  return sim.bands.every(b=>[b.p5,b.p25,b.p50,b.p75,b.p95].every(v=>isFinite(v)));
+}
+
+/* ================= 5. 解析の実行 ================= */
+/* ================= CSV モードの解析 ================= */
+function analyzeCsv(){
+  const t0=performance.now();
+  const all=A.series;
+  const wIn=parseInt($('window').value,10);
+  const use=(isFinite(wIn)&&wIn>0) ? all.slice(-wIn) : all;
+  // 価格は対数で扱う（比率で動く量なので、差分ではなく対数差が正しい）
+  const vals=use.map(s=>Math.log(s.c));
+  const o={ model:$('model').value,
+            horizon:Math.round(num($('horizon').value,24,1,500)),
+           paths:num($('paths').value,10000,500,200000), drift:A.drift,
+            vol:$('vol').value, window: use.length };
+  const sim=simulate(vals,o);
+  if(!bandsOk(sim)) return note('予測値の計算に失敗しました（数値が異常です）。'
+    + '詳細設定を既定値に戻してお試しください。','err');
+  const diag=diagnose(vals);
+  const lg=all.map(s=>Math.log(s.c));
+  const bt=backtest(lg, o);
+  const btAlt=backtest(lg, {...o, vol: o.vol==='ewma'?'const':'ewma'});
+  A.res={ mode:'csv', series:use, all, sim, o, diag, bt, btAlt,
+          disp:v=>Math.exp(v), unit:'', ms:Math.round(performance.now()-t0) };
+  drawCsv(); summarize(); reveal();
+}
+
+function analyze(){
+  if(A.mode==='csv') return analyzeCsv();
+  const {data:D,W,H}=A;
+  const t0=performance.now();
+  const pal=autoPalette(D,W,H);
+  if(!pal) return fail('ローソク足らしい色が見つかりませんでした。チャート部分だけを切り取った画像でお試しください。');
+  const reg=autoRegion(D,W,H,pal.hues);
+  if(!reg) return fail('チャートの範囲を特定できませんでした。');
+
+  // しきい値を自動で振って、いちばん筋の通る読み取りを選ぶ（手動調整を不要にする）
+  const sensList = A.manualSens ? [parseInt($('sens').value,10)] : [2,3,4,6,8,11,14];
+  const tried=new Set(); let bestCs=[], bestPx=0, bestQ=0;
+  for(const sv of sensList){
+    const mp=Math.max(3, Math.min(40, Math.round(pal.medRun/(18/sv))));
+    if(tried.has(mp)) continue;
+    tried.add(mp);
+    const c=regularize(extract(D,W,H,reg,pal.hues,mp));
+    const q=quality(c,reg);
+    if(q>bestQ){ bestQ=q; bestCs=c; bestPx=mp; }
+  }
+  let cs=bestCs, minPx=bestPx;
+  if(bestQ===0){
+    const found=pal.stats.map(s=>`<span style="color:hsl(${Math.round(s.hue)},70%,62%)">■</span>`).join('');
+    return fail(`この画像からはローソク足を見つけられませんでした。${found ? '検出できた色は '+found+' ですが、どれも縦に並ぶローソク足の形をしていません。' : ''}`
+      + `<br><br><b>よくある原因</b><br>`
+      + `・チャート以外の画面（デスクトップやアプリの全体像）が写っている<br>`
+      + `・チャートが小さすぎる／ローソク足が細すぎる<br>`
+      + `・ラインチャートや白黒のチャートで、色付きのローソク足がない<br><br>`
+      + `チャート部分だけを切り取った画像でお試しください。`);
+  }
+
+  const ov=$('orient').value;
+  cs=orient(cs, ov==='auto'?undefined:true);
+
+  // 画面座標は下が大きいので符号を反転して「上＝増加」にする
+  const vals=cs.map(c=>-c.closeY);
+  const o={ model:$('model').value, horizon:Math.round(num($('horizon').value,24,1,200)),
+            paths:num($('paths').value,10000,500,200000), drift:A.drift, vol:$('vol').value };
+  const sim=simulate(vals,o);
+  if(!bandsOk(sim)) return fail('予測値の計算に失敗しました（数値が異常です）。'
+    + '詳細設定の「予測する本数」「シナリオ試行回数」を既定値に戻してお試しください。');
+
+  const pitch=cs.length>1?(cs[cs.length-1].xc-cs[0].xc)/(cs.length-1):8;
+  A.res={pal,reg,cs,sim,o,pitch,minPx,ms:Math.round(performance.now()-t0)};
+  draw(); summarize(); reveal();
+}
+function fail(msg){
+  $('out').classList.remove('hidden');
+  $('kpis').innerHTML=''; $('tbl').innerHTML=''; $('verdict').innerHTML='';
+  const s=$('status'); s.className='status err'; s.innerHTML=msg;
+  try{ s.scrollIntoView({behavior:'smooth', block:'center'}); }catch(e){}
+  const cv=$('view'), g=cv.getContext('2d');
+  cv.width=A.W; cv.height=A.H; g.drawImage(A.img,0,0);
+}
+
+/* ================= CSV モードのチャート描画 ================= */
+function drawCsv(){
+  const {series,sim,o}=A.res;
+  const cv=$('view'), g=cv.getContext('2d');
+  const dpr=Math.min(2, window.devicePixelRatio||1);
+  const cssW=Math.min(1060, Math.max(600, (cv.parentElement?.clientWidth||1000)));
+  const cssH=520;
+  cv.style.width=cssW+'px'; cv.style.height=cssH+'px';
+  cv.width=Math.round(cssW*dpr); cv.height=Math.round(cssH*dpr);
+  g.setTransform(dpr,0,0,dpr,0,0);
+  g.fillStyle='#0d1117'; g.fillRect(0,0,cssW,cssH);
+
+  const padL=8, padR=76, padT=14, padB=26;
+  const PW=cssW-padL-padR, PH=cssH-padT-padB;
+  const H=o.horizon;
+  const showN=Math.min(series.length, Math.max(40, Math.round(H*4)));
+  const hist=series.slice(-showN);
+  const N=showN+H;
+
+  let lo=Infinity, hi=-Infinity;
+  hist.forEach(s=>{ lo=Math.min(lo,s.l); hi=Math.max(hi,s.h); });
+  sim.bands.forEach(b=>{ lo=Math.min(lo,Math.exp(b.p5)); hi=Math.max(hi,Math.exp(b.p95)); });
+  const pad=(hi-lo)*0.05||1; lo-=pad; hi+=pad;
+  const X=i=>padL+(i/(N-1))*PW;
+  const Y=p=>padT+(1-(p-lo)/(hi-lo))*PH;
+  const pitch=PW/(N-1);
+
+  // グリッドと価格軸
+  g.strokeStyle='#2b3444'; g.fillStyle='#8b949e'; g.lineWidth=1;
+  g.font='11px ui-monospace,Menlo,monospace'; g.textAlign='left';
+  for(let k=0;k<=5;k++){
+    const p=lo+(hi-lo)*k/5, y=Y(p);
+    g.beginPath(); g.moveTo(padL,y); g.lineTo(padL+PW,y); g.stroke();
+    g.fillText(Math.round(p).toLocaleString('ja-JP'), padL+PW+6, y+4);
+  }
+
+  // ローソク足（本数が多いときは終値のラインに切り替え）
+  const cw=Math.max(1, Math.min(9, pitch*0.68));
+  if(pitch>=2.2){
+    hist.forEach((s,i)=>{
+      const x=X(i), up=s.c>=s.o;
+      g.strokeStyle=up?'#26d0c4':'#e8434f'; g.fillStyle=g.strokeStyle;
+      g.lineWidth=Math.max(1,cw*0.18);
+      g.beginPath(); g.moveTo(x,Y(s.h)); g.lineTo(x,Y(s.l)); g.stroke();
+      const yt=Y(Math.max(s.o,s.c)), yb=Y(Math.min(s.o,s.c));
+      g.fillRect(x-cw/2, yt, cw, Math.max(1,yb-yt));
+    });
+  }else{
+    g.beginPath();
+    hist.forEach((s,i)=> i?g.lineTo(X(i),Y(s.c)):g.moveTo(X(i),Y(s.c)));
+    g.strokeStyle='#e6edf3'; g.lineWidth=1.4; g.stroke();
+  }
+
+  const lastP=hist[hist.length-1].c, lastX=X(showN-1);
+  const band=(k1,k2,fill)=>{
+    g.beginPath(); g.moveTo(lastX, Y(lastP));
+    sim.bands.forEach((b,i)=> g.lineTo(X(showN+i), Y(Math.exp(b[k2]))));
+    for(let i=sim.bands.length-1;i>=0;i--) g.lineTo(X(showN+i), Y(Math.exp(sim.bands[i][k1])));
+    g.closePath(); g.fillStyle=fill; g.fill();
+  };
+  band('p5','p95','rgba(47,129,247,.17)');
+  band('p25','p75','rgba(47,129,247,.42)');
+
+  if($('showPaths').checked){
+    g.strokeStyle='rgba(230,237,243,.20)'; g.lineWidth=1;
+    sim.samples.forEach(p=>{
+      g.beginPath(); g.moveTo(lastX,Y(lastP));
+      p.forEach((v,i)=> g.lineTo(X(showN+i), Y(Math.exp(v))));
+      g.stroke();
+    });
+  }
+
+  // オレンジは常に1本
+  const dp=(path,wide,alpha)=>{
+    if(!path||!path.length) return;
+    g.beginPath(); g.moveTo(lastX,Y(lastP));
+    path.forEach((v,i)=> g.lineTo(X(showN+i), Y(Math.exp(v))));
+    g.lineJoin='round'; g.lineCap='round';
+    if(!alpha){ g.strokeStyle='rgba(0,0,0,.85)'; g.lineWidth=wide?7:4.5; g.stroke(); }
+    g.strokeStyle=alpha?'rgba(255,176,32,.35)':'#ffb020'; g.lineWidth=wide?4:2; g.stroke();
+  };
+  if($('showSide').checked) dp(sim.mainDir>0?sim.dnPath:sim.upPath,false,true);
+  if(!sim.decisive) g.setLineDash([9,6]);
+  dp(sim.main, true, false);
+  g.setLineDash([]);
+
+  // 現在地
+  g.setLineDash([4,4]); g.strokeStyle='rgba(139,148,158,.7)'; g.lineWidth=1;
+  g.beginPath(); g.moveTo(lastX,padT); g.lineTo(lastX,padT+PH); g.stroke(); g.setLineDash([]);
+  g.beginPath(); g.arc(lastX,Y(lastP),3.2,0,Math.PI*2); g.fillStyle='#e6edf3'; g.fill();
+
+  // 右端のラベル
+  g.font='600 11px -apple-system,sans-serif'; g.textAlign='left';
+  const eb=sim.bands[sim.bands.length-1];
+  const put=(t,p,c)=>{ const y=Math.max(10,Math.min(cssH-4,Y(p)+4));
+    g.fillStyle=c; g.fillText(t, padL+PW+6, y); };
+  put('90%上限 '+Math.round(Math.exp(eb.p95)).toLocaleString('ja-JP'), Math.exp(eb.p95), '#78afff');
+  put('90%下限 '+Math.round(Math.exp(eb.p5)).toLocaleString('ja-JP'),  Math.exp(eb.p5),  '#78afff');
+  if(sim.main.length){
+    const mp=Math.exp(sim.main[sim.main.length-1]);
+    put((sim.mainDir>0?'▲ 上 ':'▼ 下 ')+(sim.mainProb*100).toFixed(0)+'% '
+      +Math.round(mp).toLocaleString('ja-JP'), mp, '#ffb020');
+  }
+  g.fillStyle='#8b949e'; g.textAlign='center'; g.font='11px sans-serif';
+  g.fillText(`実績 ${showN} 本`, padL+(lastX-padL)/2, cssH-8);
+  g.fillText(`予測 ${H} 本先`, lastX+(padL+PW-lastX)/2, cssH-8);
+}
+
+/* ================= 6. 画像の上に描く ================= */
+function draw(){
+  const {cs,sim,o,pitch}=A.res;
+  const cv=$('view'), g=cv.getContext('2d');
+  const reg=A.res.reg;
+  // 右端の価格軸は、予測エリアの分だけ右へずらして残す
+  const axisX=Math.min(A.W, Math.round(reg.x1+pitch));
+  const axisW=A.W-axisX;
+  const lastX=cs[cs.length-1].xc;
+  const fcW=Math.ceil(lastX+o.horizon*pitch-axisX)+Math.round(pitch*3);
+  // スマホ画面まるごとではなく、チャートの高さだけを切り出して見やすくする
+  const mgn=Math.round(Math.max(20,(reg.y1-reg.y0)*0.10));
+  const cy0=Math.max(0, reg.y0-mgn), cy1=Math.min(A.H, reg.y1+mgn);
+  cv.width=axisX+fcW+axisW; cv.height=cy1-cy0;
+
+  const i0=((reg.y0+5)*A.W+(reg.x0+2))*4;
+  g.fillStyle=`rgb(${A.data[i0]},${A.data[i0+1]},${A.data[i0+2]})`;
+  g.fillRect(0,0,cv.width,cv.height);
+  g.save();
+  g.translate(0,-cy0);          // 以降は元画像と同じ座標で描ける
+  g.drawImage(A.img, 0,0, axisX,A.H, 0,0, axisX,A.H);
+  if(axisW>0) g.drawImage(A.img, axisX,0, axisW,A.H, axisX+fcW,0, axisW,A.H);
+
+  const X=h=>lastX+pitch*h;
+  const Y=v=>-v;                       // vals は -y なので戻すだけ
+
+  // キャンバスは画面幅に縮小表示されるため、その縮小率のぶん線を太くしておく。
+  // こうしないと、解像度の高い画像ほど線が細く見えてしまう。
+  const shown=Math.min(cv.width, (cv.parentElement&&cv.parentElement.clientWidth)||cv.width);
+  const k=Math.max(1, cv.width/Math.max(320,shown));
+  const px=n=>n*k;                     // 「画面上で n px に見える太さ」
+
+  // 実績の終値ライン
+  g.beginPath();
+  cs.forEach((c,i)=> i?g.lineTo(c.xc,c.closeY):g.moveTo(c.xc,c.closeY));
+  g.strokeStyle='rgba(230,237,243,.9)'; g.lineWidth=px(1.6); g.stroke();
+
+  const band=(lo,hi,fill)=>{
+    g.beginPath(); g.moveTo(lastX, Y(sim.last));
+    sim.bands.forEach((b,i)=> g.lineTo(X(i+1), Y(b[hi])));
+    for(let i=sim.bands.length-1;i>=0;i--) g.lineTo(X(i+1), Y(sim.bands[i][lo]));
+    g.closePath(); g.fillStyle=fill; g.fill();
+  };
+  band('p5','p95','rgba(47,129,247,.24)');
+  band('p25','p75','rgba(47,129,247,.50)');
+
+  // 個別シナリオ（既定では非表示）
+  if($('showPaths').checked){
+    g.lineWidth=Math.max(1,A.W/1400); g.strokeStyle='rgba(230,237,243,.22)';
+    sim.samples.forEach(p=>{
+      g.beginPath(); g.moveTo(lastX, Y(sim.last));
+      p.forEach((v,i)=> g.lineTo(X(i+1), Y(v)));
+      g.stroke();
+    });
+  }
+
+  const drawPath=(path,color,wide,arrow)=>{
+    if(!path||!path.length) return;
+    const w=wide?px(5):px(2.5);
+    const trace=()=>{ g.beginPath(); g.moveTo(lastX, Y(sim.last));
+      path.forEach((v,i)=> g.lineTo(X(i+1), Y(v))); };
+    g.lineJoin='round'; g.lineCap='round';
+    // 濃い縁取りを先に引き、どんな背景でも線が浮き上がるようにする
+    trace(); g.strokeStyle='rgba(0,0,0,.85)'; g.lineWidth=w+px(3); g.stroke();
+    trace(); g.strokeStyle=color; g.lineWidth=w; g.stroke();
+    if(arrow){
+      const ex=X(o.horizon), ey=Y(path[path.length-1]);
+      const ang=Math.atan2(Y(path[path.length-1])-Y(path[Math.max(0,path.length-2)]), pitch);
+      const r=px(11);
+      g.beginPath();
+      g.moveTo(ex+r*Math.cos(ang), ey+r*Math.sin(ang));
+      g.lineTo(ex+r*Math.cos(ang+2.5), ey+r*Math.sin(ang+2.5));
+      g.lineTo(ex+r*Math.cos(ang-2.5), ey+r*Math.sin(ang-2.5));
+      g.closePath(); g.fillStyle=color;
+      g.strokeStyle='rgba(0,0,0,.85)'; g.lineWidth=px(2); g.stroke(); g.fill();
+    }else{
+      // 矢印が無いときは終点に丸をつけて、線の行き先を分かりやすくする
+      const ex=X(o.horizon), ey=Y(path[path.length-1]);
+      g.beginPath(); g.arc(ex,ey,px(5),0,Math.PI*2);
+      g.fillStyle=color; g.strokeStyle='rgba(0,0,0,.85)'; g.lineWidth=px(2);
+      g.fill(); g.stroke();
+    }
+  };
+  // 参考として反対側のシナリオを薄く併記（任意）
+  if($('showSide').checked){
+    drawPath(sim.mainDir>0?sim.dnPath:sim.upPath, 'rgba(255,176,32,.30)', false, false);
+  }
+  // オレンジ1本は「確率が高い方の向き」。
+  // 統計的に意味のある差なら実線、五分に近いなら破線にして、強さを線の形でも示す。
+  if(!sim.decisive) g.setLineDash([px(9),px(6)]);
+  drawPath(sim.main, '#ffb020', true, true);
+  g.setLineDash([]);
+
+  // 現在地
+  g.setLineDash([5,5]); g.strokeStyle='rgba(139,148,158,.8)'; g.lineWidth=1;
+  g.beginPath(); g.moveTo(lastX,cy0); g.lineTo(lastX,cy1); g.stroke();
+  g.setLineDash([]);
+  g.beginPath(); g.arc(lastX, Y(sim.last), px(4),0,Math.PI*2);
+  g.fillStyle='#e6edf3'; g.fill();
+
+  // 上下端のラベル
+  const f=Math.round(px(13));
+  g.font=`600 ${f}px -apple-system,sans-serif`; g.textAlign='right';
+  const eb=sim.bands[sim.bands.length-1];
+  const lx=axisX+fcW-4;
+  const lab=(t,v,col)=>{
+    const y=Math.max(cy0+f, Math.min(cy1-4, Y(v)+f*0.35));
+    g.fillStyle='rgba(9,10,25,.72)';
+    g.fillRect(lx-g.measureText(t).width-5, y-f, g.measureText(t).width+7, f*1.35);
+    g.fillStyle=col; g.fillText(t, lx, y);
+  };
+  lab('90%上限', eb.p95, 'rgba(120,175,255,.95)');
+  if(sim.main.length)
+    lab((sim.mainDir>0?'▲ 上 ':'▼ 下 ')+(sim.mainProb*100).toFixed(0)+'%'
+        +(sim.decisive?'':'（ほぼ五分）'), sim.main[sim.main.length-1], '#ffb020');
+  lab('90%下限', eb.p5,  'rgba(120,175,255,.95)');
+  g.restore();
+}
+
+/* ---- 共通：本命の向きと強さ、表と診断を書き出す ---- */
+function writeOutcome(sim,o,fmtV,nowTxt,rng,extraKpi){
+  const eb=sim.bands[sim.bands.length-1];
+  const ci=sim.ci, pu=sim.probUpEnd;
+  const dirKpi = [
+    ['向き', `${sim.mainDir>0?'▲ 上':'▼ 下'} ${(sim.mainProb*100).toFixed(0)}%`
+      + (sim.decisive?'':`<span style="font-size:11px;color:var(--dim)"> ほぼ五分</span>`),
+      sim.mainDir>0?'up':'down'],
+    [`${o.horizon}本先 到達目安`, fmtV(sim.main[sim.main.length-1]), sim.mainDir>0?'up':'down'],
+    [`${o.horizon}本先 反対に動いた場合`,
+      fmtV(sim.mainDir>0?sim.dnPath[sim.dnPath.length-1]:sim.upPath[sim.upPath.length-1]), 'dim']];
+  $('kpis').innerHTML=[
+    ...extraKpi,
+    ['現在地', nowTxt, ''],
+    ...dirKpi,
+    ['上に終わる確率', `${(pu*100).toFixed(0)}%`
+      + `<span style="font-size:11px;color:var(--dim)"> (${(ci.lo*100).toFixed(0)}〜${(ci.hi*100).toFixed(0)}%)</span>`,
+      sim.decisive?(sim.mainDir>0?'up':'down'):'dim'],
+    [`${o.horizon}本先 90%の範囲`, rng, 'dim'],
+  ].map(([l,v,c])=>`<div class="kpi"><div class="l">${l}</div><div class="v ${c}">${v}</div></div>`).join('');
+
+  $('verdict').className = 'status ' + (sim.decisive?'':'warn');
+  const dirName = sim.mainDir>0?'上':'下';
+  $('verdict').innerHTML = sim.decisive
+    ? `<b>この先は「${dirName}」が優勢です（${(sim.mainProb*100).toFixed(0)}%）。</b>`
+      + `履歴を引き直しても ${(ci.lo*100).toFixed(0)}〜${(ci.hi*100).toFixed(0)}% の範囲に収まり50%を含まないので、`
+      + `この向きは統計的に意味があります。オレンジの実線がその方向です。`
+    : `<b>この先は「${dirName}」がわずかに優勢（${(sim.mainProb*100).toFixed(0)}%）。オレンジの破線がその方向です。</b>`
+      + `<br>ただし正直に申し上げると、同じデータを引き直すと確率は ${(ci.lo*100).toFixed(0)}〜${(ci.hi*100).toFixed(0)}% に散らばり、`
+      + `50%をまたぎます。つまり<b>${dirName}と反対とで、実質的な差はありません</b>（コイン投げに近い）。`
+      + `破線にしているのはそのためです。確実性が欲しい場合は、この向きより<b>値幅（90%の範囲）</b>の方が信頼できます。`;
+
+  const steps=[];
+  for(let h=1;h<=o.horizon;h++)
+    if(h<=2||h===o.horizon||h%Math.max(1,Math.round(o.horizon/6))===0) steps.push(h);
+  $('tbl').innerHTML=`<tr><th>先の本数</th><th>下限(5%)</th><th>やや下(25%)</th><th>中央</th>`
+    + `<th>やや上(75%)</th><th>上限(95%)</th><th>上昇確率</th></tr>`
+    + [...new Set(steps)].sort((a,b)=>a-b).map(h=>{
+      const b=sim.bands[h-1], p=sim.probUp[h-1];
+      return `<tr><td>${h}本先</td><td class="dim">${fmtV(b.p5)}</td><td>${fmtV(b.p25)}</td>`
+        + `<td class="${b.p50>=sim.last?'up':'down'}"><strong>${fmtV(b.p50)}</strong></td>`
+        + `<td>${fmtV(b.p75)}</td><td class="dim">${fmtV(b.p95)}</td>`
+        + `<td class="${p>=0.5?'up':'down'}">${(p*100).toFixed(1)}%</td></tr>`;
+    }).join('');
+}
+
+/* ---- 統計診断とバックテストの表示 ---- */
+function writeDiag(diag,bt,o,btAlt){
+  if(!diag){ $('stats').classList.add('hidden'); return; }
+  $('stats').classList.remove('hidden');
+  const sig=(v,se)=> Math.abs(v)>se
+    ? `<span class="up">有意</span>` : `<span class="dim">ノイズと区別できない</span>`;
+  const row=(x,se)=>`<tr><td>${x.lag}本前</td><td>${x.v>=0?'+':''}${x.v.toFixed(3)}</td>`
+    + `<td class="dim">±${se.toFixed(3)}</td><td>${sig(x.v,se)}</td></tr>`;
+  $('acTbl').innerHTML =
+    `<tr><th>ずらし幅</th><th>相関 φ</th><th>誤差</th><th>判定</th></tr>`
+    + `<tr><td colspan="4" class="dim" style="padding-top:8px"><b>方向は読めるか</b>（値動きそのものの自己相関）</td></tr>`
+    + diag.ret.map(x=>row(x,diag.se)).join('')
+    + `<tr><td>直前と同じ向き</td><td>${(diag.same*100).toFixed(1)}%</td>`
+    + `<td class="dim">±${(diag.sameSe*100).toFixed(1)}%</td>`
+    + `<td>${Math.abs(diag.same-0.5)>diag.sameSe?'<span class="up">有意</span>':'<span class="dim">50%と差がない</span>'}</td></tr>`
+    + `<tr><td colspan="4" class="dim" style="padding-top:8px"><b>値幅は読めるか</b>（値動きの大きさの自己相関）</td></tr>`
+    + diag.vol.map(x=>row(x,diag.se)).join('');
+  $('acNote').innerHTML = `サンプル ${diag.n} 本。`
+    + `複数のずらし幅を同時に見ているので、1つだけ「有意」が出るのは偶然でも起こります。`
+    + `<b>方向</b>がすべて「区別できない」なら、この銘柄・時間軸では向きは読めないという意味です。`;
+
+  if(!bt){ $('btBox').innerHTML='<span class="dim">バックテストにはより多くのデータが必要です（目安：予測本数の20倍以上）。</span>'; return; }
+  const cell=(actual,nominal)=>{
+    const diff=Math.abs(actual-nominal);
+    const cls = diff<0.05?'up' : diff<0.12?'warn' : 'down';
+    const judge = diff<0.05?'よく合っている' : diff<0.12?'ややズレ' : '外れている';
+    return `<td class="${cls==='warn'?'':cls}">${(actual*100).toFixed(1)}%</td><td class="dim">${judge}</td>`;
+  };
+  $('btBox').innerHTML=
+    `<table><tr><th>予測区間</th><th>本来の的中率</th><th>実際の的中率</th><th>判定</th></tr>`
+    + `<tr><td>50%区間</td><td class="dim">50.0%</td>${cell(bt.in50,0.5)}</tr>`
+    + `<tr><td>90%区間</td><td class="dim">90.0%</td>${cell(bt.in90,0.9)}</tr>`
+    + (bt.dir!=null?`<tr><td>本命の向き</td><td class="dim">50.0%</td>${cell(bt.dir,0.5)}</tr>`:'')
+    + `</table>`
+    + `<div class="dim" style="font-size:11.5px;margin-top:6px">`
+    + `過去データ上で ${bt.n} 回、${bt.W}本を見て${bt.H}本先を予測し、実際に区間へ入ったかを数えた結果です。`
+    + `<b>区間</b>が本来の値に近ければ「値幅の予測は信頼できる」。`
+    + `<b>向き</b>が50%付近なら「方向は当てられていない」ことを意味します。</div>`
+    + (btAlt ? (()=>{
+        const e=b=>Math.abs(b.in50-0.5)+Math.abs(b.in90-0.9);
+        const now=o.vol==='ewma'?'直近重視(EWMA)':'全期間で一定';
+        const alt=o.vol==='ewma'?'全期間で一定':'直近重視(EWMA)';
+        const better=e(bt)<e(btAlt);
+        return `<div style="margin-top:12px;padding:9px 11px;border-radius:6px;background:var(--panel2)">`
+          + `<b>値幅の見積り方の比較（このデータでの実測）</b><br>`
+          + `<span class="${better?'up':'dim'}">${now}（現在）：名目からのズレ ${(e(bt)*100).toFixed(1)}pt</span><br>`
+          + `<span class="${better?'dim':'up'}">${alt}：名目からのズレ ${(e(btAlt)*100).toFixed(1)}pt</span><br>`
+          + `<span style="font-size:11.5px" class="dim">`
+          + (better ? `現在の設定の方がこのデータには合っています。`
+                    : `「${alt}」に切り替えた方が、このデータでは的中率が名目に近づきます。詳細設定で変更できます。`)
+          + `</span></div>`;
+      })() : '');
+}
+
+/* ================= 7. 数値のまとめ ================= */
+function summarizeCsv(){
+  const {series,all,sim,o,diag,bt,btAlt,ms}=A.res;
+  $('out').classList.remove('hidden');
+  const yen=v=>Math.round(Math.exp(v)).toLocaleString('ja-JP');
+  const last=Math.exp(sim.last);
+  const eb=sim.bands[sim.bands.length-1];
+  writeOutcome(sim,o,yen,yen(sim.last),`${yen(eb.p5)} 〜 ${yen(eb.p95)}`,
+    [['使ったデータ', series.length+' 本', '']]);
+
+  const sgPct=sim.sigma*100;
+  $('status').className='status';
+  $('status').innerHTML=`CSVを読み込みました（全 ${all.length} 本 / 推定に直近 ${series.length} 本を使用、${ms} ms）。`
+    + `1本あたりの変動は ${sgPct.toFixed(3)}%（約 ${Math.round(last*sim.sigma).toLocaleString('ja-JP')}円）。`
+    + `画像から読む場合と違い、価格は誤差ゼロで取り込まれています。`;
+  $('diag').innerHTML=`データ ${all.length} 本 → 推定に ${series.length} 本使用<br>`
+    + `1本あたり 平均対数収益率 ${sim.mu.toExponential(3)} ／ 標準偏差 ${sgPct.toFixed(4)}%<br>`
+    + `σ の推定誤差は約 ±${(100/Math.sqrt(2*series.length)).toFixed(1)}%`
+    + `（65本なら ±8.8%、1000本なら ±2.2%）`;
+  writeDiag(diag,bt,o,btAlt);
+}
+
+function summarize(){
+  if(A.res && A.res.mode==='csv') return summarizeCsv();
+  const {cs,sim,o,pal,reg,minPx,ms}=A.res;
+  $('out').classList.remove('hidden');
+
+  // 任意の価格較正：チャート内の最高値／最安値から線形に対応づける
+  const ph=parseFloat($('pHigh').value), pl=parseFloat($('pLow').value);
+  const yHi=Math.min(...cs.map(c=>c.hiY)), yLo=Math.max(...cs.map(c=>c.loY));
+  const priced = isFinite(ph)&&isFinite(pl)&&ph!==pl&&yHi!==yLo;
+  const v2p = v => ph + (-v - yHi)*(pl-ph)/(yLo-yHi);     // v は -y
+  const unit = sim.atr || 1;
+  const fmtV = v => priced
+      ? Math.round(v2p(v)).toLocaleString('ja-JP')
+      : ((v-sim.last)/unit>=0?'+':'') + ((v-sim.last)/unit).toFixed(1)+'幅';
+
+  const eb=sim.bands[sim.bands.length-1], pu=sim.probUp[sim.probUp.length-1];
+  const nowTxt = priced ? Math.round(v2p(sim.last)).toLocaleString('ja-JP') : '基準';
+  const rng = priced
+    ? `${Math.round(v2p(eb.p5)).toLocaleString('ja-JP')} 〜 ${Math.round(v2p(eb.p95)).toLocaleString('ja-JP')}`
+    : `±${(((eb.p95-eb.p5)/2)/unit).toFixed(1)} 幅`;
+
+  writeOutcome(sim,o,fmtV,nowTxt,rng,[['読み取ったローソク足', cs.length+' 本','']]);
+  writeDiag(diagnose(cs.map(c=>-c.closeY)), null, o);
+
+  const st=$('status');
+  st.className='status';
+  st.innerHTML=(A.fileInfo?`<b>読み込んだ画像：${A.fileInfo}</b><br>`:'')
+    + `自動解析 完了（${ms} ms）。ローソク足の色を <span style="color:hsl(${Math.round(pal.hues[0])},70%,60%)">■</span>`
+    + (pal.hues[1]!=null?` と <span style="color:hsl(${Math.round(pal.hues[1])},70%,60%)">■</span>`:'')
+    + ` と判定し、移動平均線は除外しました。上の白い線が読み取った終値です — ここがチャートとずれていたら「詳細設定」の感度を調整してください。`;
+
+  const flip=cs[0].flip;
+  $('diag').innerHTML=
+    `検出領域 x ${reg.x0}–${reg.x1} / y ${reg.y0}–${reg.y1}（画像 ${A.W}×${A.H}）<br>`
+    + `色相ピーク ${pal.stats.map(s=>Math.round(s.hue)+'°(縦'+s.sel+'px/'+s.groups+'塊)').join('・')}`
+    + ` → ローソク色 ${pal.hues.map(h=>Math.round(h)+'°').join(' / ')}<br>`
+    + `縦の最小連続画素 ${minPx}px ／ 陽線＝${flip?'2番目':'1番目'}の色（始値と前の終値が最も連続する向きを採用）<br>`
+    + `1本あたりの平均値動き ${sim.atr.toFixed(2)}px ／ ばらつき ${sim.sigma.toFixed(2)}px`
+    + (priced?` ／ 価格較正あり`:` ／ 価格較正なし（値幅は相対表示）`);
+}
+
+/* ================= 統計診断 =================
+   「方向は読めるのか」「値幅は読めるのか」をデータ自身に語らせる。 */
+function autocorr(a,lag){
+  const m=meanOf(a); let n=0,d=0;
+  for(let i=lag;i<a.length;i++) n+=(a[i]-m)*(a[i-lag]-m);
+  for(let i=0;i<a.length;i++)   d+=(a[i]-m)*(a[i]-m);
+  return d?n/d:0;
+}
+function diagnose(vals){
+  const r=[]; for(let i=1;i<vals.length;i++) r.push(vals[i]-vals[i-1]);
+  const n=r.length, se=1.96/Math.sqrt(n);
+  const ret=[1,2,3,5].map(L=>({lag:L, v:autocorr(r,L)}));
+  const vol=[1,2,3,5].map(L=>({lag:L, v:autocorr(r.map(Math.abs),L)}));
+  let same=0; for(let i=1;i<n;i++) if(Math.sign(r[i])===Math.sign(r[i-1])) same++;
+  return {n, se, ret, vol, same:same/(n-1), sameSe:1.96/(2*Math.sqrt(n-1))};
+}
+
+/* ================= バックテスト（区間の的中率）=================
+   過去の各時点で予測を作り、実際の値が予測区間に入っていたかを数える。
+   90%区間が本当に90%当たるなら、その予測は「較正されている」。 */
+function backtest(vals, o){
+  const H=o.horizon, W=Math.min(o.window, Math.max(30, Math.floor(vals.length/3)));
+  const need=W+H;
+  if(vals.length < need+20) return null;
+  const step=Math.max(1, Math.floor((vals.length-need)/150));
+  let n=0, in50=0, in90=0, dirOK=0, dirN=0;
+  for(let s=W; s+H<vals.length; s+=step){
+    const win=vals.slice(s-W,s), last=win[win.length-1];
+    const d=[]; for(let i=1;i<win.length;i++) d.push(win[i]-win[i-1]);
+    let mu=meanOf(d);
+    const sg = o.vol==='ewma' ? ewmaSd(d,0.94) : sdOf(d);
+    if(o.drift==='zero') mu=0; else if(o.drift==='half') mu*=0.5;
+    // 正規近似で区間を出す（モンテカルロと同じ分布・高速）
+    const m=last+mu*H, sH=sg*Math.sqrt(H);
+    const actual=vals[s+H-1];
+    if(Math.abs(actual-m) <= 0.6745*sH) in50++;
+    if(Math.abs(actual-m) <= 1.6449*sH) in90++;
+    if(mu!==0){ dirN++; if(Math.sign(actual-last)===Math.sign(mu)) dirOK++; }
+    n++;
+  }
+  return n<20?null:{n, in50:in50/n, in90:in90/n, dir:dirN?dirOK/dirN:null, H, W};
+}
+
+/* ================= CSV の読み込み =================
+   TradingView / Yahoo / 日本語ヘッダー / 終値だけ、いずれも自動判別する。 */
+function parseCsv(text){
+  const lines=text.split(/\r?\n/).filter(l=>l.trim().length);
+  if(lines.length<3) throw new Error('行が少なすぎます');
+  // 区切り文字は1行目で最も多いものを採用
+  const delim=[',','\t',';'].map(d=>({d,n:lines[0].split(d).length})).sort((a,b)=>b.n-a.n)[0].d;
+  // 引用符の中の区切り文字（"63,400.00" の桁区切り）は分割しない
+  const cell=l=>{
+    const out=[]; let cur='', q=false;
+    for(let i=0;i<l.length;i++){
+      const ch=l[i];
+      if(ch==='"'||ch==="'"){
+        if(q && l[i+1]===ch){ cur+=ch; i++; } else q=!q;
+      } else if(ch===delim && !q){ out.push(cur); cur=''; }
+      else cur+=ch;
+    }
+    out.push(cur);
+    return out.map(s=>s.trim());
+  };
+  const num=s=>{
+    if(s==null) return NaN;
+    const v=parseFloat(String(s).replace(/[, ¥$]/g,''));
+    return isFinite(v)?v:NaN;
+  };
+  const head=cell(lines[0]).map(s=>s.toLowerCase());
+  const hasHead=head.some(h=>/date|time|open|high|low|close|price|日付|時刻|日時|始値|高値|安値|終値/.test(h));
+  const body=(hasHead?lines.slice(1):lines).map(cell);
+
+  let iT=-1,iO=-1,iH=-1,iL=-1,iC=-1;
+  if(hasHead){
+    const at=(...p)=>head.findIndex(h=>p.some(q=>h.includes(q)));
+    iT=at('time','date','日付','時刻','日時');
+    iO=at('open','始値'); iH=at('high','高値'); iL=at('low','安値');
+    iC=head.findIndex(h=>/^adj/.test(h)) >= 0 && head.findIndex(h=>/^close$/.test(h))<0
+        ? head.findIndex(h=>/^adj/.test(h))
+        : at('close','終値','price','last');
+  }
+  if(iC<0){
+    // ヘッダーが無い／読めない場合は、数値になる列の数から推測する
+    const r0=body.find(r=>r.some(c=>isFinite(num(c))))||body[0];
+    const numCols=r0.map((c,i)=>({i,ok:isFinite(num(c))})).filter(x=>x.ok).map(x=>x.i);
+    if(numCols.length>=5){ [iO,iH,iL,iC]=numCols.slice(numCols.length-5,numCols.length-1); iT=0; }
+    else if(numCols.length===4){ [iO,iH,iL,iC]=numCols; }
+    else if(numCols.length===2){ iC=numCols[1]; iT=numCols[0]; }
+    else if(numCols.length===1){ iC=numCols[0]; }
+    else throw new Error('価格らしい数値の列が見つかりません');
+  }
+
+  const out=[];
+  for(const r of body){
+    const c=num(r[iC]);
+    if(!isFinite(c)||c<=0) continue;
+    const o=iO>=0?num(r[iO]):c, h=iH>=0?num(r[iH]):c, l=iL>=0?num(r[iL]):c;
+    out.push({
+      t: iT>=0 ? String(r[iT]) : '',
+      o: isFinite(o)?o:c, h: isFinite(h)?h:c, l: isFinite(l)?l:c, c
+    });
+  }
+  if(out.length<10) throw new Error('有効な価格データが '+out.length+' 行しかありません');
+  // 新しい順に並んでいたら古い順へ直す
+  if(iT>=0 && out.length>2){
+    const p=v=>{const d=Date.parse(v); return isFinite(d)?d:(isFinite(num(v))?num(v):NaN);};
+    const a=p(out[0].t), b=p(out[out.length-1].t);
+    if(isFinite(a)&&isFinite(b)&&a>b) out.reverse();
+  }
+  return out;
+}
+
+/* ================= 動作テスト =================
+   ブラウザ内でサンプルのローソク足チャートを生成し、
+   読み取り〜予測〜描画まで一気通貫で動くかを確かめる。   */
+function selfTest(){
+  const W=900,H=520,N=90,X0=40,STEP=8,CW=5;
+  const off=document.createElement('canvas');
+  off.width=W; off.height=H;
+  const g=off.getContext('2d');
+  g.fillStyle='#090a19'; g.fillRect(0,0,W,H);
+  let s=12345;
+  const rnd=()=>{ s=(s*1103515245+12345)&0x7fffffff; return s/0x7fffffff; };
+  const T=[]; let p=63000;
+  for(let i=0;i<N;i++){
+    const o=p, c=o*(1+(rnd()-0.5)*0.004);
+    T.push({o,h:Math.max(o,c)*(1+rnd()*0.0012), l:Math.min(o,c)*(1-rnd()*0.0012), c});
+    p=c;
+  }
+  const lo=Math.min(...T.map(t=>t.l)), hi=Math.max(...T.map(t=>t.h)), pd=(hi-lo)*0.1;
+  const P0=lo-pd, P1=hi+pd, Y0=H-40, Y1=40;
+  const y=v=>Math.round(Y0+(v-P0)*(Y1-Y0)/(P1-P0));
+  T.forEach((t,k)=>{
+    const xL=X0+k*STEP, xm=xL+2;
+    g.fillStyle=g.strokeStyle=(t.c>=t.o)?'#e00b3d':'#37ddd6';
+    g.fillRect(xm,y(t.h),1,Math.max(1,y(t.l)-y(t.h)));
+    const bt=y(Math.max(t.o,t.c)), bb=y(Math.min(t.o,t.c));
+    g.fillRect(xL,bt,CW,Math.max(1,bb-bt));
+  });
+  // 移動平均線も入れて、本番と同じ条件にする
+  const ma=(n,i)=>{const a=T.slice(Math.max(0,i-n+1),i+1);return a.reduce((q,t)=>q+t.c,0)/a.length;};
+  [[5,'#d1c41e'],[25,'#ff88ac']].forEach(([n,col])=>{
+    g.strokeStyle=col; g.lineWidth=2; g.beginPath();
+    for(let k=0;k<N;k++){ const xx=X0+k*STEP+2, yy=y(ma(n,k)); k?g.lineTo(xx,yy):g.moveTo(xx,yy); }
+    g.stroke();
+  });
+
+  const im=new Image();
+  im.onload=()=>{
+    A.mode='image'; A.img=im; A.W=W; A.H=H;
+    const o2=document.createElement('canvas'); o2.width=W; o2.height=H;
+    const oc=o2.getContext('2d',{willReadFrequently:true});
+    oc.drawImage(im,0,0);
+    A.data=oc.getImageData(0,0,W,H).data;
+    $('drop').classList.add('hidden'); $('again').classList.remove('hidden');
+    note('動作テスト：サンプルのチャートを生成しました。解析します…','warn');
+    setTimeout(()=>{
+      try{
+        analyze();
+        const n=A.res&&A.res.cs?A.res.cs.length:0;
+        if(n>=60){
+          note(`<b>動作テスト 合格。</b>サンプル ${N} 本のチャートから ${n} 本を読み取り、`
+            + `オレンジの予測ラインまで描画できました。`
+            + `<br>この表示でオレンジの線が見えているなら、アプリもブラウザも正常です。`
+            + `見えていない場合は、右側の予測エリアが画面の外にある可能性があります（横スクロールしてみてください）。`,'ok');
+        }else{
+          note(`動作テスト：サンプルから ${n} 本しか読み取れませんでした。`,'err');
+        }
+      }catch(e){ note('動作テストでエラー：'+e.message,'err'); }
+    },60);
+  };
+  im.onerror=()=>note('動作テスト：サンプル画像の生成に失敗しました。','err');
+  im.src=off.toDataURL('image/png');
+}
+
+/* ================= 入力 ================= */
+// 結果が画面外に出ないよう、解析後に結果までスクロールする
+function reveal(){
+  try{ $('out').scrollIntoView({behavior:'smooth', block:'start'}); }catch(e){}
+}
+function note(msg,kind){
+  $('out').classList.remove('hidden');
+  const s=$('status'); s.className='status'+(kind?' '+kind:''); s.innerHTML=msg;
+  // 長いキャンバスの陰に隠れないよう、メッセージ自体を画面内に出す
+  try{ s.scrollIntoView({behavior:'smooth', block:'center'}); }catch(e){}
+}
+// 解析の前に、読み込んだ画像そのものを表示する。
+// これで「画像が読めていない」のか「解析が終わっていない」のかが一目で分かる。
+function preview(){
+  const cv=$('view'), g=cv.getContext('2d');
+  cv.width=A.W; cv.height=A.H;
+  g.drawImage(A.img,0,0);
+}
+
+function load(src, name){
+  A.fileInfo='';
+  const im=new Image();
+  im.onerror=()=>note(
+    `画像を読み込めませんでした${name?`（${name}）`:''}。`
+    + `<br>HEIC など、ブラウザが表示できない形式の可能性があります。`
+    + `PNG か JPEG で保存し直してからお試しください。`, 'err');
+  im.onload=()=>{
+    try{
+      A.mode='image';
+      A.img=im; A.W=im.width; A.H=im.height;
+      if(!A.W||!A.H) throw new Error('画像サイズが取得できません');
+      const off=document.createElement('canvas');
+      off.width=A.W; off.height=A.H;
+      const oc=off.getContext('2d',{willReadFrequently:true});
+      oc.drawImage(im,0,0);
+      A.data=oc.getImageData(0,0,A.W,A.H).data;
+    }catch(err){
+      return note('画像の読み取りに失敗しました：'+err.message
+        + '<br>画像が大きすぎるか、形式が対応していない可能性があります。','err');
+    }
+    $('drop').classList.add('hidden');
+    $('again').classList.remove('hidden');
+    preview();
+    A.fileInfo=`${name||'(名前なし)'} / ${A.W}×${A.H}px`;
+    note(`<b>今この画像を解析しています：</b>${A.fileInfo}<br>解析中…`,'warn');
+    // 画面を一度描画させてから重い処理に入る（固まって見えないように）
+    setTimeout(()=>{
+      try{ analyze(); }
+      catch(err){ note('解析中にエラーが発生しました：'+err.message,'err'); }
+    }, 60);
+  };
+  im.src=src;
+}
+function loadCsvText(text,name){
+  let rows;
+  try{ rows=parseCsv(text); }
+  catch(err){
+    return note(`CSVを読み取れませんでした${name?`（${name}）`:''}：${err.message}`
+      + '<br>日付・始値・高値・安値・終値の列があるCSV、または終値だけを並べたファイルに対応しています。','err');
+  }
+  A.mode='csv'; A.series=rows; A.img=null; A.data=null;
+  $('drop').classList.add('hidden'); $('again').classList.remove('hidden');
+  note(`CSVを読み込みました（${rows.length} 本）。解析しています…`,'warn');
+  setTimeout(()=>{
+    try{ analyze(); }
+    catch(err){ note('解析中にエラーが発生しました：'+err.message,'err'); }
+  },60);
+}
+const isCsv=f=> /\.(csv|tsv|txt)$/i.test(f.name||'') ||
+  /text\/(csv|tab-separated-values|plain)/.test(f.type||'');
+const readFile=f=>{
+  note(`ファイルを受け取りました：${f.name||'(名前なし)'}（${Math.round((f.size||0)/1024).toLocaleString()} KB）読み込み中…`,'warn');
+  const r=new FileReader();
+  r.onerror=()=>note('ファイルを読み込めませんでした。','err');
+  if(isCsv(f)){ r.onload=e=>loadCsvText(e.target.result, f.name); r.readAsText(f); }
+  else { r.onload=e=>load(e.target.result, f.name); r.readAsDataURL(f); }
+  A.mode = isCsv(f) ? 'csv' : 'image';
+};
+
+$('drop').onclick=()=>$('file').click();
+// 値をクリアしないと、同じファイルを選び直したときに何も起きない
+$('file').onchange=e=>{ const f=e.target.files[0]; e.target.value=''; if(f) readFile(f); };
+$('again').onclick=()=>$('file').click();
+$('pick').onclick=()=>$('file').click();
+$('selftest').onclick=selfTest;
+['dragenter','dragover'].forEach(t=>document.addEventListener(t,e=>{
+  e.preventDefault(); $('drop').classList.add('hot'); }));
+['dragleave','drop'].forEach(t=>document.addEventListener(t,e=>{
+  e.preventDefault(); $('drop').classList.remove('hot'); }));
+document.addEventListener('drop',e=>{
+  const dt=e.dataTransfer;
+  const f=dt?.files?.[0];
+  if(f && (f.type.startsWith('image/')||isCsv(f))) return readFile(f);
+  if(f) return note(`このファイルは扱えません（${f.name||''} / ${f.type||'種類不明'}）。`
+    + `PNG・JPEG の画像か、CSV ファイルをドロップしてください。`,'err');
+  // ファイルが無い＝写真アプリやWebページから「リンク」としてドラッグされた場合
+  const uri=dt?.getData?.('text/uri-list')||dt?.getData?.('text/plain')||'';
+  if(/^https?:|^data:image\//i.test(uri.trim())){
+    note('リンクとして受け取りました。読み込みを試します…','warn');
+    return load(uri.trim(), 'ドロップされたリンク');
+  }
+  const txt=dt?.getData?.('text/plain')||'';
+  if(txt && txt.split(/\r?\n/).length>10) return loadCsvText(txt,'ドロップされたテキスト');
+  note('ドロップは検知しましたが、中身を取り出せませんでした。'
+    + '<br>写真アプリやWebページから直接ドラッグすると、画像ではなく「リンク」が渡されることがあります。'
+    + '<br>一度デスクトップなどにファイルとして保存してから、そのファイルをドロップしてください。'
+    + '（この欄をクリックしてファイルを選ぶ方法でも読み込めます）','err');
+});
+document.addEventListener('paste',e=>{
+  for(const it of (e.clipboardData?.items||[]))
+    if(it.type.startsWith('image/')){ readFile(it.getAsFile()); e.preventDefault(); return; }
+  const txt=e.clipboardData?.getData('text');
+  if(txt && txt.split(/\r?\n/).length>10 && /[\d.]{3,}/.test(txt)){
+    loadCsvText(txt,'貼り付けたデータ'); e.preventDefault();
+  }
+});
+
+document.querySelectorAll('#driftSeg button').forEach(b=>{
+  b.onclick=()=>{
+    document.querySelectorAll('#driftSeg button').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on'); A.drift=b.dataset.d;
+    if(A.data) analyze();
+  };
+});
+['horizon','model','paths','orient','showPaths','showSide','window','vol'].forEach(id=>
+  $(id).onchange=()=>{ if(A.data) analyze(); });
+$('sens').onchange=()=>{ A.manualSens=true; if(A.data) analyze(); };
+['pHigh','pLow'].forEach(id=>
+  $(id).oninput=()=>{ if(A.res) summarize(); });
+</script>
+</body>
+</html>
