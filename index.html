@@ -71,7 +71,7 @@ th{color:var(--dim);font-weight:600;font-size:11px}
     <div class="sub">スクリーンショットまたはCSVを入れるだけ。設定不要で読み取り、この先の想定を描きます。</div>
   </div>
   <span style="background:#1f6feb;color:#fff;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700">
-    ver&nbsp;I</span>
+    ver&nbsp;J</span>
   <button id="selftest" class="ghost">動作テスト</button>
   <button id="pick">ファイルを選ぶ</button>
 </header>
@@ -1048,16 +1048,26 @@ function draw(){
   // 抵抗（上）と支持（下）の水準を横一線で引く
   const lv=A.res.lv;
   if(lv){
+    // 価格較正が入っていれば、線のラベルにも実際の値段を出す
+    const ph=parseFloat($('pHigh').value), pl=parseFloat($('pLow').value);
+    const yTop=Math.min(...cs.map(c=>c.hiY)), yBot=Math.max(...cs.map(c=>c.loY));
+    const priced=isFinite(ph)&&isFinite(pl)&&ph!==pl&&yTop!==yBot;
+    const closeY=cs[cs.length-1].closeY;
+    const unit=sim.atr||1;
+    const money=y=> priced
+      ? Math.round(ph+(y-yTop)*(pl-ph)/(yBot-yTop)).toLocaleString('ja-JP')
+      : ((closeY-y)/unit>=0?'+':'')+((closeY-y)/unit).toFixed(1)+'幅';
     const drawLv=(l,col,txt)=>{
       g.strokeStyle=col; g.lineWidth=px(l.touches>=3?2.4:1.6);
       g.setLineDash(l.touches>=3?[]:[px(10),px(7)]);
       g.beginPath(); g.moveTo(0,l.y); g.lineTo(axisX+fcW,l.y); g.stroke();
       g.setLineDash([]);
-      const fs=Math.round(px(12.5));
+      const fs=Math.round(px(13.5));
       g.font=`700 ${fs}px -apple-system,sans-serif`; g.textAlign='left';
-      const t=`${txt}　${l.recent||l.edge?'直近':l.touches+'回'}`, tw=g.measureText(t).width;
+      const t=`${txt} ${money(l.y)}　${l.recent||l.edge?'直近':l.touches+'回'}`;
+      const tw=g.measureText(t).width;
       const bx=Math.min(axisX+fcW-tw-14, lastX+pitch*1.2);
-      g.fillStyle='rgba(9,10,25,.82)';
+      g.fillStyle='rgba(9,10,25,.88)';
       g.fillRect(bx, l.y-fs*1.05, tw+10, fs*1.4);
       g.fillStyle=col; g.fillText(t, bx+5, l.y+fs*0.28);
     };
@@ -1595,14 +1605,14 @@ document.querySelectorAll('#driftSeg button').forEach(b=>{
 ['horizon','model','paths','orient','showPaths','showSide','window','vol'].forEach(id=>
   $(id).onchange=()=>{ if(A.data) analyze(); });
 $('sens').onchange=()=>{ A.manualSens=true; if(A.data) analyze(); };
-['pHigh','pLow'].forEach(id=>
-  $(id).oninput=()=>{ if(A.res) summarize(); });
+const redraw=()=>{ if(!A.res) return; if(A.res.mode!=='csv') draw(); summarize(); };
+['pHigh','pLow'].forEach(id=> $(id).oninput=redraw);
 
-// 目立つ場所の価格入力 → 詳細設定側と同期して即反映
+// 目立つ場所の価格入力 → 詳細設定側と同期して即反映（チャートの線ラベルも更新）
 const syncCal=()=>{
   $('pHigh').value=$('pHigh2').value;
   $('pLow').value =$('pLow2').value;
-  if(A.res) summarize();
+  redraw();
 };
 $('applyCal').onclick=syncCal;
 ['pHigh2','pLow2'].forEach(id=>$(id).oninput=syncCal);
