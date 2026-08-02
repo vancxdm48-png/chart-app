@@ -28,6 +28,7 @@ h1{margin:0;font-size:17px}
 .drop .small{color:var(--dim);font-size:12.5px;margin-top:6px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin-top:16px}
 canvas{max-width:100%;border-radius:8px;display:block}
+canvas.big{max-width:none}
 button{background:var(--accent);color:#fff;border:0;border-radius:6px;padding:7px 13px;
  font-size:13px;cursor:pointer;font-family:inherit}
 button:hover{filter:brightness(1.15)}
@@ -71,7 +72,7 @@ th{color:var(--dim);font-weight:600;font-size:11px}
     <div class="sub">スクリーンショットまたはCSVを入れるだけ。設定不要で読み取り、この先の想定を描きます。</div>
   </div>
   <span style="background:#1f6feb;color:#fff;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700">
-    ver&nbsp;M</span>
+    ver&nbsp;N</span>
   <button id="selftest" class="ghost">動作テスト</button>
   <button id="pick">ファイルを選ぶ</button>
 </header>
@@ -104,7 +105,12 @@ th{color:var(--dim);font-weight:600;font-size:11px}
           <button id="applyCal" class="ghost" style="height:38px">円で表示</button>
         </div>
       </div>
-      <canvas id="view"></canvas>
+      <div style="display:flex;justify-content:flex-end;margin-bottom:6px">
+        <button id="zoom" class="ghost" style="padding:5px 12px;font-size:12px">大きく表示</button>
+      </div>
+      <div id="viewWrap" style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+        <canvas id="view"></canvas>
+      </div>
       <div class="legend">
         <span><span class="sw" style="background:#ffb020"></span><b style="color:#ffb020">予測ライン</b>（向きが不明なときは中央＝ほぼ水平）</span>
         <span><span class="sw" style="background:#e6edf3"></span>読み取った終値</span>
@@ -1182,7 +1188,7 @@ function draw(){
   const axisX=Math.min(A.W, Math.round(reg.x1+pitch));
   const axisW=A.W-axisX;
   const lastX=cs[cs.length-1].xc;
-  const fcW=Math.ceil(lastX+o.horizon*pitch-axisX)+Math.round(pitch*3);
+  const fcW=Math.ceil(lastX+o.horizon*pitch-axisX)+Math.round(pitch*1.2);
   // スマホ画面まるごとではなく、チャートの高さだけを切り出して見やすくする
   const mgn=Math.round(Math.max(20,(reg.y1-reg.y0)*0.10));
   const cy0=Math.max(0, reg.y0-mgn), cy1=Math.min(A.H, reg.y1+mgn);
@@ -1201,7 +1207,9 @@ function draw(){
 
   // キャンバスは画面幅に縮小表示されるため、その縮小率のぶん線を太くしておく。
   // こうしないと、解像度の高い画像ほど線が細く見えてしまう。
-  const shown=Math.min(cv.width, (cv.parentElement&&cv.parentElement.clientWidth)||cv.width);
+  const big=cv.classList&&cv.classList.contains('big');
+  const shown=big? cv.width
+    : Math.min(cv.width, (cv.parentElement&&cv.parentElement.clientWidth)||cv.width);
   const k=Math.max(1, cv.width/Math.max(320,shown));
   const px=n=>n*k;                     // 「画面上で n px に見える太さ」
 
@@ -1278,9 +1286,9 @@ function draw(){
   // 右端の価格軸の上に、その高さの値段を色付きの札で置く（TradingView と同じ見え方）
   const taken=[];                     // 札どうしが重ならないよう、埋まった高さを覚えておく
   const tag=(y,t,bg,fg)=>{
-    const fs=Math.round(px(13));
+    const fs=Math.round(px(10.5));
     g.font=`700 ${fs}px -apple-system,sans-serif`; g.textAlign='left';
-    const w=g.measureText(t).width+px(12), h=fs*1.55;
+    const w=g.measureText(t).width+px(8), h=fs*1.45;
     let yy=Math.max(cy0+fs, Math.min(cy1-px(4), y));
     for(let n=0;n<12;n++){
       const hit=taken.find(o=>Math.abs(o-yy)<h*1.02);
@@ -1290,7 +1298,7 @@ function draw(){
     taken.push(yy);
     const bx=cv.width-w-px(2);
     g.fillStyle=bg; g.fillRect(bx, yy-fs*0.92, w, h);
-    g.fillStyle=fg||'#fff'; g.fillText(t, bx+px(6), yy+fs*0.42);
+    g.fillStyle=fg||'#fff'; g.fillText(t, bx+px(4), yy+fs*0.42);
   };
 
   // 抵抗（上）と支持（下）の水準を横一線で引く
@@ -1301,7 +1309,7 @@ function draw(){
       g.setLineDash(l.touches>=3?[]:[px(10),px(7)]);
       g.beginPath(); g.moveTo(0,l.y); g.lineTo(cv.width,l.y); g.stroke();
       g.setLineDash([]);
-      const fs=Math.round(px(13.5));
+      const fs=Math.round(px(10.5));
       g.font=`700 ${fs}px -apple-system,sans-serif`; g.textAlign='left';
       const t=`${txt}　${l.recent||l.edge?'直近':l.touches+'回'}`;
       const tw=g.measureText(t).width;
@@ -1323,7 +1331,7 @@ function draw(){
   g.fillStyle='#e6edf3'; g.fill();
 
   // 上下端のラベル
-  const f=Math.round(px(13));
+  const f=Math.round(px(10.5));
   g.font=`600 ${f}px -apple-system,sans-serif`; g.textAlign='right';
   const eb=sim.bands[sim.bands.length-1];
   const lx=axisX+fcW-4;
@@ -1877,6 +1885,13 @@ const syncCal=()=>{
   redraw();
 };
 $('applyCal').onclick=()=>{ A.manualCal=true; A.autoCal=false; syncCal(); };
+$('zoom').onclick=()=>{
+  const cv=$('view'), big=cv.classList.contains('big');
+  if(big){ cv.classList.remove('big'); $('zoom').textContent='大きく表示'; }
+  else   { cv.classList.add('big');    $('zoom').textContent='画面に合わせる'; }
+  if(A.res && A.res.mode!=='csv') draw();          // 線の太さを表示倍率に合わせ直す
+  if(cv.classList.contains('big')) $('viewWrap').scrollLeft=cv.width;
+};
 paintCal();
 ['pHigh2','pLow2'].forEach(id=>$(id).oninput=()=>{ A.manualCal=true; A.autoCal=false; syncCal(); });
 </script>
