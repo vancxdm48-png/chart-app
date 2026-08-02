@@ -72,7 +72,7 @@ th{color:var(--dim);font-weight:600;font-size:11px}
     <div class="sub">スクリーンショットまたはCSVを入れるだけ。設定不要で読み取り、この先の想定を描きます。</div>
   </div>
   <span style="background:#1f6feb;color:#fff;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700">
-    ver&nbsp;N</span>
+    ver&nbsp;O</span>
   <button id="selftest" class="ghost">動作テスト</button>
   <button id="pick">ファイルを選ぶ</button>
 </header>
@@ -121,16 +121,6 @@ th{color:var(--dim);font-weight:600;font-size:11px}
         <span><span class="sw" style="background:#e8506a"></span>下値（支持）</span>
       </div>
 
-      <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        <span class="dim" style="font-size:12px">先読みの前提：</span>
-        <div class="seg" id="driftSeg">
-          <button data-d="zero" class="on">トレンドなし</button>
-          <button data-d="half">トレンド半分</button>
-          <button data-d="est">トレンドそのまま</button>
-        </div>
-        <span class="dim" style="font-size:11.5px">直近の傾きをどれだけ先に延ばすか</span>
-      </div>
-
       <button id="again" class="ghost hidden" style="margin-top:10px">別の画像を読み込む</button>
 
       <details>
@@ -168,6 +158,15 @@ th{color:var(--dim);font-weight:600;font-size:11px}
           <div><label>チャート内の最安値（任意）</label>
             <input id="pLow" type="number" step="any" placeholder="例 62630"></div>
         </div>
+      <div style="margin-top:4px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <span class="dim" style="font-size:12px">先読みの前提：</span>
+        <div class="seg" id="driftSeg">
+          <button data-d="zero" class="on">トレンドなし</button>
+          <button data-d="half">トレンド半分</button>
+          <button data-d="est">トレンドそのまま</button>
+        </div>
+        <span class="dim" style="font-size:11.5px">直近の傾きをどれだけ先に延ばすか。<b>通常は「トレンドなし」のままで結構です</b>（当たりやすくなるわけではなく、前提を変えたときに絵がどれだけ変わるかを見るためのものです）。</span>
+      </div>
         <div id="diag" class="dim" style="font-size:12px;margin-top:12px"></div>
       </details>
     </div>
