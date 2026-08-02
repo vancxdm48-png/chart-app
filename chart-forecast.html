@@ -71,7 +71,7 @@ th{color:var(--dim);font-weight:600;font-size:11px}
     <div class="sub">スクリーンショットまたはCSVを入れるだけ。設定不要で読み取り、この先の想定を描きます。</div>
   </div>
   <span style="background:#1f6feb;color:#fff;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700">
-    ver&nbsp;J</span>
+    ver&nbsp;K</span>
   <button id="selftest" class="ghost">動作テスト</button>
   <button id="pick">ファイルを選ぶ</button>
 </header>
@@ -1045,31 +1045,50 @@ function draw(){
   drawPath(sim.main, '#ffb020', true, true);
   g.setLineDash([]);
 
+  // 価格較正が入っていれば、線のラベルにも実際の値段を出す
+  const ph=parseFloat($('pHigh').value), pl=parseFloat($('pLow').value);
+  const yTop=Math.min(...cs.map(c=>c.hiY)), yBot=Math.max(...cs.map(c=>c.loY));
+  const priced=isFinite(ph)&&isFinite(pl)&&ph!==pl&&yTop!==yBot;
+  const closeY=cs[cs.length-1].closeY;
+  const unit=sim.atr||1;
+  const money=y=> priced
+    ? Math.round(ph+(y-yTop)*(pl-ph)/(yBot-yTop)).toLocaleString('ja-JP')
+    : ((closeY-y)/unit>=0?'+':'')+((closeY-y)/unit).toFixed(1)+'幅';
+  // 右端の価格軸の上に、その高さの値段を色付きの札で置く（TradingView と同じ見え方）
+  const taken=[];                     // 札どうしが重ならないよう、埋まった高さを覚えておく
+  const tag=(y,t,bg,fg)=>{
+    const fs=Math.round(px(13));
+    g.font=`700 ${fs}px -apple-system,sans-serif`; g.textAlign='left';
+    const w=g.measureText(t).width+px(12), h=fs*1.55;
+    let yy=Math.max(cy0+fs, Math.min(cy1-px(4), y));
+    for(let n=0;n<12;n++){
+      const hit=taken.find(o=>Math.abs(o-yy)<h*1.02);
+      if(hit===undefined) break;
+      yy = yy<=hit ? hit-h*1.05 : hit+h*1.05;      // 近い方へ少しずらす
+    }
+    taken.push(yy);
+    const bx=cv.width-w-px(2);
+    g.fillStyle=bg; g.fillRect(bx, yy-fs*0.92, w, h);
+    g.fillStyle=fg||'#fff'; g.fillText(t, bx+px(6), yy+fs*0.42);
+  };
+
   // 抵抗（上）と支持（下）の水準を横一線で引く
   const lv=A.res.lv;
   if(lv){
-    // 価格較正が入っていれば、線のラベルにも実際の値段を出す
-    const ph=parseFloat($('pHigh').value), pl=parseFloat($('pLow').value);
-    const yTop=Math.min(...cs.map(c=>c.hiY)), yBot=Math.max(...cs.map(c=>c.loY));
-    const priced=isFinite(ph)&&isFinite(pl)&&ph!==pl&&yTop!==yBot;
-    const closeY=cs[cs.length-1].closeY;
-    const unit=sim.atr||1;
-    const money=y=> priced
-      ? Math.round(ph+(y-yTop)*(pl-ph)/(yBot-yTop)).toLocaleString('ja-JP')
-      : ((closeY-y)/unit>=0?'+':'')+((closeY-y)/unit).toFixed(1)+'幅';
     const drawLv=(l,col,txt)=>{
       g.strokeStyle=col; g.lineWidth=px(l.touches>=3?2.4:1.6);
       g.setLineDash(l.touches>=3?[]:[px(10),px(7)]);
-      g.beginPath(); g.moveTo(0,l.y); g.lineTo(axisX+fcW,l.y); g.stroke();
+      g.beginPath(); g.moveTo(0,l.y); g.lineTo(cv.width,l.y); g.stroke();
       g.setLineDash([]);
       const fs=Math.round(px(13.5));
       g.font=`700 ${fs}px -apple-system,sans-serif`; g.textAlign='left';
-      const t=`${txt} ${money(l.y)}　${l.recent||l.edge?'直近':l.touches+'回'}`;
+      const t=`${txt}　${l.recent||l.edge?'直近':l.touches+'回'}`;
       const tw=g.measureText(t).width;
       const bx=Math.min(axisX+fcW-tw-14, lastX+pitch*1.2);
       g.fillStyle='rgba(9,10,25,.88)';
       g.fillRect(bx, l.y-fs*1.05, tw+10, fs*1.4);
       g.fillStyle=col; g.fillText(t, bx+5, l.y+fs*0.28);
+      tag(l.y, money(l.y), col, '#0d1117');
     };
     lv.up.slice(0,2).forEach((l,i)=>drawLv(l, i?'rgba(120,175,255,.75)':'#4d9bff', i?'上値②':'上値①'));
     lv.down.slice(0,2).forEach((l,i)=>drawLv(l, i?'rgba(232,80,100,.75)':'#e8506a', i?'下値②':'下値①'));
@@ -1098,6 +1117,14 @@ function draw(){
     lab((sim.mainDir>0?'▲ 上 ':'▼ 下 ')+(sim.mainProb*100).toFixed(0)+'%'
         +(sim.decisive?'':'（ほぼ五分）'), sim.main[sim.main.length-1], '#ffb020');
   lab('90%下限', eb.p5,  'rgba(120,175,255,.95)');
+  // 右端の軸にも、予測の上限・下限・本命の値段を札で出す
+  tag(-eb.p95, money(-eb.p95), 'rgba(47,129,247,.92)', '#fff');
+  tag(-eb.p5,  money(-eb.p5),  'rgba(47,129,247,.92)', '#fff');
+  if(sim.main.length){
+    const my=-sim.main[sim.main.length-1];
+    tag(my, money(my), '#ffb020', '#0d1117');
+  }
+  tag(-sim.last, money(-sim.last), '#e6edf3', '#0d1117');
   g.restore();
 }
 
